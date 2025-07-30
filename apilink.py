@@ -1,3 +1,14 @@
+!pip install requests
+!pip install beautifulsoup4
+!pip install pandas
+
+import requests
+from bs4 import BeautifulSoup
+import pandas as pd
+import sys
+from difflib import get_close_matches
+import numpy as np
+
 pd.set_option('display.max_columns', None)
 pd.set_option('display.width', 1000)
 
