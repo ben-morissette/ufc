@@ -1,20 +1,11 @@
 import streamlit as st
 import pandas as pd
-import requests
-from bs4 import BeautifulSoup
-import string
-import os
-from datetime import datetime
-from difflib import get_close_matches
+import sys
 
-LEADERBOARD_FILE = "rax_leaderboard.csv"
-TEST_MODE = True  # Set to False in production
-
-# -------------------------------
-# RAX calculation logic
-# -------------------------------
+# Your calculate_rax function (same as before)
 def calculate_rax(row):
     rax = 0
+    # Rule 1: Rax based on method_main
     if row['result'] == 'win':
         if row['method_main'] == 'KO/TKO':
             rax += 100
@@ -29,226 +20,78 @@ def calculate_rax(row):
     elif row['result'] == 'loss':
         rax += 25
 
+    # Rule 2: Rax based on significant strike difference
+    sig_str_fighter = 0
+    sig_str_opponent = 0
     if 'TOT_fighter_SigStr_landed' in row.index and 'TOT_opponent_SigStr_landed' in row.index:
-        diff = row['TOT_fighter_SigStr_landed'] - row['TOT_opponent_SigStr_landed']
-        if diff > 0:
-            rax += diff
+        sig_str_fighter = row['TOT_fighter_SigStr_landed']
+        sig_str_opponent = row['TOT_opponent_SigStr_landed']
 
+    if sig_str_fighter > sig_str_opponent:
+        rax += sig_str_fighter - sig_str_opponent
+
+    # Rule 3: Bonus for 5-round fights
     if 'TimeFormat' in row.index and '5 Rnd' in str(row['TimeFormat']):
         rax += 25
 
+    # Rule 4: Bonus for "Fight of the Night"
     if 'Details' in row.index and 'Fight of the Night' in str(row['Details']):
         rax += 50
 
     return rax
 
-# -------------------------------
-def get_fighter_url_by_name(name):
-    url = f"http://ufcstats.com/statistics/fighters?char={name[0].lower()}&page=all"
-    res = requests.get(url)
-    soup = BeautifulSoup(res.text, 'html.parser')
-    table = soup.find('table', class_='b-statistics__table')
-    rows = table.find('tbody').find_all('tr')
 
-    fighter_urls = {}
-    for row in rows:
-        fighter_name = row.find_all('td')[0].text.strip()
-        fighter_link = row.find('a')['href']
-        fighter_urls[fighter_name] = fighter_link
-
-    match = get_close_matches(name, fighter_urls.keys(), n=1, cutoff=0.6)
-    if match:
-        return fighter_urls[match[0]]
-    else:
-        raise ValueError("Fighter not found")
-
-# -------------------------------
-def get_fight_links(fighter_url):
-    res = requests.get(fighter_url)
-    soup = BeautifulSoup(res.text, 'html.parser')
-    table = soup.find('table', class_='b-fight-details__table')
-
-    fight_links = []
-    fighter_names = []
-    opponent_names = []
-    results = []
-    methods = []
-
-    for row in table.find('tbody').find_all('tr'):
-        columns = row.find_all('td')
-        result = columns[0].text.strip().lower()
-        opponent = columns[1].text.strip()
-        method = columns[6].text.strip()
-        link = columns[6].find('a')['href']
-
-        fight_links.append(link)
-        results.append(result)
-        opponent_names.append(opponent)
-        methods.append(method)
-
-    fighter_name = soup.find('span', class_='b-content__title-highlight').text.strip()
-
-    df = pd.DataFrame({
-        'fighter_name': fighter_name,
-        'opponent_name': opponent_names,
-        'result': results,
-        'method_main': methods,
-        'fight_link': fight_links
-    })
-
-    return fight_links, df
-
-# -------------------------------
-def parse_fight_details(fight_link, fighter_name, opponent_name):
-    res = requests.get(fight_link)
-    soup = BeautifulSoup(res.text, 'html.parser')
-
-    details = {
-        'fight_link': fight_link,
-        'TOT_fighter_SigStr_landed': 0,
-        'TOT_opponent_SigStr_landed': 0,
-        'TimeFormat': '',
-        'Details': ''
-    }
-
-    tables = soup.find_all('table')
-    if len(tables) < 2:
-        return details
-
-    for table in tables:
-        if 'Significant Strikes' in table.text:
-            rows = table.find_all('tr')
-            for row in rows[1:]:
-                cells = row.find_all('td')
-                if len(cells) < 2:
-                    continue
-                fighter_cell = cells[0].text.strip()
-                opponent_cell = cells[1].text.strip()
-
-                try:
-                    fighter_sig = int(fighter_cell.split('of')[0].strip())
-                    opponent_sig = int(opponent_cell.split('of')[0].strip())
-                except:
-                    continue
-
-                details['TOT_fighter_SigStr_landed'] = fighter_sig
-                details['TOT_opponent_SigStr_landed'] = opponent_sig
-                break
-
-    fight_details = soup.find('p', class_='b-fight-details__text')
-    if fight_details:
-        details['Details'] = fight_details.text.strip()
-
-    info_section = soup.find_all('i', class_='b-fight-details__text-item')
-    for i in info_section:
-        if 'Format' in i.text:
-            details['TimeFormat'] = i.text.strip()
-
-    return details
-
-# -------------------------------
-def transform_columns(df):
-    df['TOT_fighter_SigStr_landed'] = pd.to_numeric(df.get('TOT_fighter_SigStr_landed', 0), errors='coerce').fillna(0)
-    df['TOT_opponent_SigStr_landed'] = pd.to_numeric(df.get('TOT_opponent_SigStr_landed', 0), errors='coerce').fillna(0)
-    return df
-
-# -------------------------------
-def should_refresh():
-    now = datetime.now()
-    is_tuesday = now.weekday() == 1
-    is_morning = now.hour < 12
-
-    if not os.path.exists(LEADERBOARD_FILE):
-        return True
-
-    last_mod_time = datetime.fromtimestamp(os.path.getmtime(LEADERBOARD_FILE))
-    return is_tuesday and is_morning and last_mod_time.date() < now.date()
-
-# -------------------------------
-def get_all_fighter_links():
-    all_links = []
-    for char in string.ascii_lowercase:
-        url = f"http://ufcstats.com/statistics/fighters?char={char}&page=all"
-        res = requests.get(url)
-        soup = BeautifulSoup(res.text, 'html.parser')
-        table = soup.find('table', class_='b-statistics__table')
-        if not table:
-            continue
-        rows = table.find('tbody').find_all('tr')
-        for row in rows:
-            anchor = row.find('a')
-            if anchor and anchor.has_attr('href'):
-                link = anchor['href']
-                all_links.append(link)
-    return all_links
-
-# -------------------------------
-def build_leaderboard():
-    all_links = get_all_fighter_links()
-    if TEST_MODE:
-        all_links = all_links[:10]
-
-    all_fighters_data = []
-
-    progress_bar = st.progress(0)
-    total = len(all_links)
-
-    for i, fighter_url in enumerate(all_links):
-        try:
-            fight_links, main_df = get_fight_links(fighter_url)
-            details = [
-                parse_fight_details(
-                    f,
-                    main_df.loc[main_df['fight_link'] == f]['fighter_name'].values[0],
-                    main_df.loc[main_df['fight_link'] == f]['opponent_name'].values[0]
-                )
-                for f in fight_links
-            ]
-            adv_df = pd.DataFrame(details)
-            combined = pd.merge(main_df, adv_df, on='fight_link', how='left')
-            combined = transform_columns(combined)
-            combined['rax_earned'] = combined.apply(calculate_rax, axis=1)
-            total_rax = combined['rax_earned'].sum()
-            all_fighters_data.append({'fighter_name': main_df['fighter_name'].iloc[0], 'total_rax': total_rax})
-        except Exception as e:
-            st.warning(f"Error processing {fighter_url}: {e}")
-            continue
-
-        progress_bar.progress((i + 1) / total)
-
-    if not all_fighters_data:
-        st.error("No fighter data collected. Please check the scraping logic or website availability.")
-        return pd.DataFrame(columns=['Rank', 'fighter_name', 'total_rax'])
-
-    leaderboard = pd.DataFrame(all_fighters_data)
-
-    if 'total_rax' not in leaderboard.columns:
-        st.error("Leaderboard DataFrame missing 'total_rax' column!")
-        return pd.DataFrame(columns=['Rank', 'fighter_name', 'total_rax'])
-
-    leaderboard = leaderboard.sort_values(by='total_rax', ascending=False).reset_index(drop=True)
-    leaderboard.insert(0, "Rank", leaderboard.index + 1)
-    return leaderboard
-
-# -------------------------------
 def main():
-    st.set_page_config(page_title="UFC RAX Leaderboard", layout="wide")
-    st.title("🏆 UFC RAX Leaderboard")
+    st.title("MMA Fighter RAX Calculator")
+    st.write("Enter a fighter's name to see their RAX score breakdown.")
 
-    if not os.path.exists(LEADERBOARD_FILE) or should_refresh():
-        st.info("Refreshing leaderboard... This may take a few minutes.")
-        leaderboard_df = build_leaderboard()
-        leaderboard_df.to_csv(LEADERBOARD_FILE, index=False)
-    else:
-        leaderboard_df = pd.read_csv(LEADERBOARD_FILE)
+    fighter_input_name = st.text_input("Fighter Name", value="Max Holloway")
 
-    search_name = st.text_input("🔍 Search for a fighter:", "").strip().lower()
-    if search_name:
-        filtered = leaderboard_df[leaderboard_df['fighter_name'].str.lower().str.contains(search_name)]
-    else:
-        filtered = leaderboard_df
+    if st.button("Calculate RAX"):
+        if not fighter_input_name.strip():
+            st.error("Please enter a valid fighter name.")
+            return
 
-    st.dataframe(filtered, use_container_width=True)
+        st.info(f"Fetching data for fighter: {fighter_input_name} ...")
+
+        try:
+            fighter_url = get_fighter_url_by_name(fighter_input_name)
+            st.success(f"Found URL for {fighter_input_name}: {fighter_url}")
+        except ValueError as e:
+            st.error(str(e))
+            return
+
+        # Get fight links and main fight data
+        fight_links, main_fights_df = get_fight_links(fighter_url)
+
+        all_fight_details = []
+        for fl in fight_links:
+            row = main_fights_df.loc[main_fights_df['fight_link'] == fl].iloc[0]
+            main_fighter_name = row['fighter_name']
+            opp_name = row['opponent_name']
+            details = parse_fight_details(fl, main_fighter_name, opp_name)
+            all_fight_details.append(details)
+
+        advanced_df = pd.DataFrame(all_fight_details)
+        combined_df = pd.merge(main_fights_df, advanced_df, on='fight_link', how='left')
+
+        combined_df = transform_columns(combined_df)
+
+        combined_df['rax_earned'] = combined_df.apply(calculate_rax, axis=1)
+
+        total_rax = combined_df['rax_earned'].sum()
+
+        total_row = pd.DataFrame({
+            'fighter_name': [''],
+            'opponent_name': [''],
+            'result': [''],
+            'method_main': ['Total Rax'],
+            'rax_earned': [total_rax]
+        })
+
+        final_df = pd.concat([combined_df[['fighter_name', 'opponent_name', 'result', 'method_main', 'rax_earned']], total_row], ignore_index=True)
+
+        st.dataframe(final_df.style.format({'rax_earned': '{:.0f}'}))
 
 if __name__ == "__main__":
     main()
