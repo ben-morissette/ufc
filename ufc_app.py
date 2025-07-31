@@ -10,49 +10,17 @@ from datetime import datetime
 LEADERBOARD_FILE = "rax_leaderboard.csv"
 
 # -------------------------------
-# RAX calculation logic
+# Scoring constants
 # -------------------------------
-def calculate_rax(row):
-    rax = 0
-    
-    # Normalize result and method strings
-    result = str(row.get('result', '')).strip().lower()
-    method = str(row.get('method_main', '')).strip().lower()
+SCORING = {
+    "ko/tko": 100,
+    "submission": 90,
+    "decision - unanimous": 80,
+    "decision - majority": 75,
+    "decision - split": 70
+}
 
-    if result == 'win':
-        if 'ko/tko' in method:
-            rax += 100
-        elif 'submission' in method:
-            rax += 90
-        elif 'decision - unanimous' in method:
-            rax += 80
-        elif 'decision - majority' in method:
-            rax += 75
-        elif 'decision - split' in method:
-            rax += 70
-        else:
-            rax += 60  # fallback points for other wins
-    elif result == 'loss':
-        rax += 25
-
-    # Strike difference bonus
-    sig_str_fighter = int(row.get('TOT_fighter_SigStr_landed', 0))
-    sig_str_opponent = int(row.get('TOT_opponent_SigStr_landed', 0))
-
-    if sig_str_fighter > sig_str_opponent:
-        rax += sig_str_fighter - sig_str_opponent
-
-    # 5-round fight bonus
-    if '5 rnd' in str(row.get('TimeFormat', '')).lower():
-        rax += 25
-
-    # Fight of the night bonus
-    if 'fight of the night' in str(row.get('Details', '')).lower():
-        rax += 50
-
-    return rax
-
-
+FIVE_ROUND_BONUS = 25
 
 # -------------------------------
 # Get all fighter URLs from UFC stats
@@ -246,6 +214,7 @@ def build_leaderboard(test_mode=False, progress_bar_fighters=None, progress_bar_
                 fighter_fight_details.append(details)
 
                 if progress_bar_fights:
+                    # update progress within this fighter's fights
                     progress_bar_fights.progress(min((j+1) / max(total_fights, 1), 1.0))
 
             if not fighter_fight_details:
@@ -272,45 +241,63 @@ def build_leaderboard(test_mode=False, progress_bar_fighters=None, progress_bar_
     return leaderboard
 
 # -------------------------------
-# Streamlit app main function
+# RAX calculation logic (moved here before main)
+# -------------------------------
+def calculate_rax(row):
+    rax = 0
+    
+    # Normalize result and method strings
+    result = str(row.get('result', '')).strip().lower()
+    method = str(row.get('method_main', '')).strip().lower()
+
+    if result == 'win':
+        if 'ko/tko' in method:
+            rax += 100
+        elif 'submission' in method:
+            rax += 90
+        elif 'decision - unanimous' in method:
+            rax += 80
+        elif 'decision - majority' in method:
+            rax += 75
+        elif 'decision - split' in method:
+            rax += 70
+        else:
+            rax += 60  # fallback points for other wins
+    elif result == 'loss':
+        rax += 25
+
+    # Strike difference bonus
+    sig_str_fighter = int(row.get('TOT_fighter_SigStr_landed', 0))
+    sig_str_opponent = int(row.get('TOT_opponent_SigStr_landed', 0))
+
+    if sig_str_fighter > sig_str_opponent:
+        rax += sig_str_fighter - sig_str_opponent
+
+    # 5-round fight bonus
+    if '5 rnd' in str(row.get('TimeFormat', '')).lower():
+        rax += 25
+
+    # Fight of the night bonus
+    details_text = str(row.get('Details', '')).lower()
+    if 'fight of the night' in details_text:
+        rax += 50
+
+    return rax
+
+# -------------------------------
+# Main Streamlit app function
 # -------------------------------
 def main():
-    st.title("UFC RAX Leaderboard")
-
-    test_mode = st.checkbox("Test Mode (limit to 10 fighters)", value=True)
+    st.title("UFC Fighter RAX Leaderboard")
+    test_mode = st.checkbox("Test Mode (only first 10 fighters)")
 
     if st.button("Build Leaderboard"):
-        # Create progress bars
-        fighter_link_progress = st.progress(0, text="Scraping Fighter Links")
-        fight_processing_progress = st.progress(0, text="Processing Fights")
-
+        progress_bar_fighters = st.progress(0)
+        progress_bar_fights = st.progress(0)
         leaderboard = build_leaderboard(test_mode=test_mode,
-                                        progress_bar_fighters=fighter_link_progress,
-                                        progress_bar_fights=fight_processing_progress)
-
-        if not leaderboard.empty:
-            st.write("### Leaderboard")
-            st.dataframe(leaderboard)
-
-            # Save leaderboard to CSV
-            leaderboard.to_csv(LEADERBOARD_FILE, index=False)
-            st.success("Leaderboard saved to CSV.")
-        else:
-            st.warning("No data to display.")
-
-    # Auto-refresh leaderboard if conditions met
-    if should_refresh():
-        st.info("Auto-refreshing leaderboard due to schedule...")
-        leaderboard = build_leaderboard(test_mode=False)
-        if not leaderboard.empty:
-            leaderboard.to_csv(LEADERBOARD_FILE, index=False)
-            st.experimental_rerun()
-
-    # Load and display leaderboard from CSV if available
-    if os.path.exists(LEADERBOARD_FILE):
-        st.write("### Saved Leaderboard")
-        saved_df = pd.read_csv(LEADERBOARD_FILE)
-        st.dataframe(saved_df)
+                                        progress_bar_fighters=progress_bar_fighters,
+                                        progress_bar_fights=progress_bar_fights)
+        st.write(leaderboard)
 
 if __name__ == "__main__":
     main()
