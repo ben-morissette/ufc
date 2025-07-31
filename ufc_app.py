@@ -14,40 +14,50 @@ LEADERBOARD_FILE = "rax_leaderboard.csv"
 # -------------------------------
 def calculate_rax(row):
     rax = 0
-    # Rule 1: Rax based on method_main
-    if row['result'] == 'win':
-        if row['method_main'] == 'KO/TKO':
+
+    result = str(row.get('result', '')).strip().lower()
+    method = str(row.get('method_main', '')).strip().lower()
+
+    # Debug prints (remove/comment out after testing)
+    # print(f"Result: '{result}', Method: '{method}'")
+
+    if result == 'win':
+        if 'ko/tko' in method:
             rax += 100
-        elif row['method_main'] == 'Submission':
+        elif 'submission' in method:
             rax += 90
-        elif row['method_main'] == 'Decision - Unanimous':
+        elif 'decision - unanimous' in method:
             rax += 80
-        elif row['method_main'] == 'Decision - Majority':
+        elif 'decision - majority' in method:
             rax += 75
-        elif row['method_main'] == 'Decision - Split':
+        elif 'decision - split' in method:
             rax += 70
-    elif row['result'] == 'loss':
+        else:
+            # If method doesn't match any known type, assign a default win value
+            rax += 60  # Or 0 if you prefer
+    elif result == 'loss':
         rax += 25
 
-    # Rule 2: Rax based on significant strike difference
-    sig_str_fighter = 0
-    sig_str_opponent = 0
-    if 'TOT_fighter_SigStr_landed' in row.index and 'TOT_opponent_SigStr_landed' in row.index:
-        sig_str_fighter = row['TOT_fighter_SigStr_landed']
-        sig_str_opponent = row['TOT_opponent_SigStr_landed']
+    try:
+        sig_str_fighter = int(row.get('TOT_fighter_SigStr_landed', 0))
+        sig_str_opponent = int(row.get('TOT_opponent_SigStr_landed', 0))
+    except Exception:
+        sig_str_fighter = 0
+        sig_str_opponent = 0
 
     if sig_str_fighter > sig_str_opponent:
         rax += sig_str_fighter - sig_str_opponent
 
-    # Rule 3: Bonus for 5-round fights
-    if 'TimeFormat' in row.index and '5 Rnd' in str(row['TimeFormat']):
+    time_format = str(row.get('TimeFormat', '')).lower()
+    if '5 rnd' in time_format:
         rax += 25
 
-    # Rule 4: Bonus for "Fight of the Night"
-    if 'Details' in row.index and 'Fight of the Night' in str(row['Details']):
+    details = str(row.get('Details', '')).lower()
+    if 'fight of the night' in details:
         rax += 50
 
     return rax
+
 
 # -------------------------------
 # Get all fighter URLs from UFC stats
