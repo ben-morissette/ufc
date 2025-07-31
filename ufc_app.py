@@ -1,97 +1,61 @@
-import streamlit as st
-import pandas as pd
-import sys
+import requests
+from bs4 import BeautifulSoup
 
-# Your calculate_rax function (same as before)
-def calculate_rax(row):
-    rax = 0
-    # Rule 1: Rax based on method_main
-    if row['result'] == 'win':
-        if row['method_main'] == 'KO/TKO':
-            rax += 100
-        elif row['method_main'] == 'Submission':
-            rax += 90
-        elif row['method_main'] == 'Decision - Unanimous':
-            rax += 80
-        elif row['method_main'] == 'Decision - Majority':
-            rax += 75
-        elif row['method_main'] == 'Decision - Split':
-            rax += 70
-    elif row['result'] == 'loss':
-        rax += 25
+def get_fighter_url_by_name(name: str) -> str | None:
+    """
+    Given a fighter's name (e.g., 'Conor McGregor'), search the UFC fighter directory
+    and return the fighter's profile URL if found, else None.
+    """
 
-    # Rule 2: Rax based on significant strike difference
-    sig_str_fighter = 0
-    sig_str_opponent = 0
-    if 'TOT_fighter_SigStr_landed' in row.index and 'TOT_opponent_SigStr_landed' in row.index:
-        sig_str_fighter = row['TOT_fighter_SigStr_landed']
-        sig_str_opponent = row['TOT_opponent_SigStr_landed']
+    # Base URL for UFC fighter directory (example)
+    base_url = "https://www.ufc.com/athletes/all"
 
-    if sig_str_fighter > sig_str_opponent:
-        rax += sig_str_fighter - sig_str_opponent
+    # Step 1: Request the page that lists all fighters (or a searchable page)
+    try:
+        response = requests.get(base_url)
+        response.raise_for_status()
+    except requests.RequestException as e:
+        print(f"Network error fetching UFC fighters page: {e}")
+        return None
 
-    # Rule 3: Bonus for 5-round fights
-    if 'TimeFormat' in row.index and '5 Rnd' in str(row['TimeFormat']):
-        rax += 25
+    # Step 2: Parse the page content
+    soup = BeautifulSoup(response.text, "html.parser")
 
-    # Rule 4: Bonus for "Fight of the Night"
-    if 'Details' in row.index and 'Fight of the Night' in str(row['Details']):
-        rax += 50
+    # Step 3: Search for the fighter's name in the list of fighters on the page
+    # This example assumes fighter names are in <a> tags with hrefs containing "/athlete/"
+    fighters = soup.find_all("a", href=True)
 
-    return rax
+    # Normalize the input name for matching
+    name_lower = name.strip().lower()
 
+    for a_tag in fighters:
+        href = a_tag['href']
+        text = a_tag.get_text(strip=True).lower()
+
+        if "/athlete/" in href and name_lower == text:
+            # Found the fighter
+            # Construct the full URL if href is relative
+            fighter_url = href if href.startswith("http") else "https://www.ufc.com" + href
+            return fighter_url
+
+    # If we get here, fighter not found
+    print(f"Fighter named '{name}' not found.")
+    return None
 
 def main():
-    st.title("MMA Fighter RAX Calculator")
-    st.write("Enter a fighter's name to see their RAX score breakdown.")
+    fighter_input_name = input("Enter UFC fighter name: ").strip()
+    if not fighter_input_name:
+        print("No fighter name entered.")
+        return
 
-    fighter_input_name = st.text_input("Fighter Name", value="Max Holloway")
-
-    if st.button("Calculate RAX"):
-        if not fighter_input_name.strip():
-            st.error("Please enter a valid fighter name.")
-            return
-
-        st.info(f"Fetching data for fighter: {fighter_input_name} ...")
-
-        try:
-            fighter_url = get_fighter_url_by_name(fighter_input_name)
-            st.success(f"Found URL for {fighter_input_name}: {fighter_url}")
-        except ValueError as e:
-            st.error(str(e))
-            return
-
-        # Get fight links and main fight data
-        fight_links, main_fights_df = get_fight_links(fighter_url)
-
-        all_fight_details = []
-        for fl in fight_links:
-            row = main_fights_df.loc[main_fights_df['fight_link'] == fl].iloc[0]
-            main_fighter_name = row['fighter_name']
-            opp_name = row['opponent_name']
-            details = parse_fight_details(fl, main_fighter_name, opp_name)
-            all_fight_details.append(details)
-
-        advanced_df = pd.DataFrame(all_fight_details)
-        combined_df = pd.merge(main_fights_df, advanced_df, on='fight_link', how='left')
-
-        combined_df = transform_columns(combined_df)
-
-        combined_df['rax_earned'] = combined_df.apply(calculate_rax, axis=1)
-
-        total_rax = combined_df['rax_earned'].sum()
-
-        total_row = pd.DataFrame({
-            'fighter_name': [''],
-            'opponent_name': [''],
-            'result': [''],
-            'method_main': ['Total Rax'],
-            'rax_earned': [total_rax]
-        })
-
-        final_df = pd.concat([combined_df[['fighter_name', 'opponent_name', 'result', 'method_main', 'rax_earned']], total_row], ignore_index=True)
-
-        st.dataframe(final_df.style.format({'rax_earned': '{:.0f}'}))
+    try:
+        fighter_url = get_fighter_url_by_name(fighter_input_name)
+        if fighter_url:
+            print(f"Fighter URL: {fighter_url}")
+        else:
+            print("Fighter URL not found.")
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
 
 if __name__ == "__main__":
     main()
