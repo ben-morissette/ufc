@@ -249,7 +249,6 @@ def build_leaderboard(test_mode=False, progress_bar_fighters=None, progress_bar_
                 fighter_fight_details.append(details)
 
                 if progress_bar_fights:
-                    # update progress within this fighter's fights
                     progress_bar_fights.progress(min((j+1) / max(total_fights, 1), 1.0))
 
             if not fighter_fight_details:
@@ -286,36 +285,35 @@ def main():
     if st.button("Build Leaderboard"):
         # Create progress bars
         fighter_link_progress = st.progress(0, text="Scraping Fighter Links")
-        fight_processing_progress = st.progress(0, text="Processing Fights per Fighter")
+        fight_processing_progress = st.progress(0, text="Processing Fights")
 
-        with st.spinner("Building leaderboard, please wait..."):
-            leaderboard_df = build_leaderboard(
-                test_mode=test_mode,
-                progress_bar_fighters=fighter_link_progress,
-                progress_bar_fights=fight_processing_progress
-            )
+        leaderboard = build_leaderboard(test_mode=test_mode,
+                                        progress_bar_fighters=fighter_link_progress,
+                                        progress_bar_fights=fight_processing_progress)
 
-        if leaderboard_df.empty:
-            st.error("No fighter data was scraped. Please check your scraping functions or test mode settings.")
+        if not leaderboard.empty:
+            st.write("### Leaderboard")
+            st.dataframe(leaderboard)
+
+            # Save leaderboard to CSV
+            leaderboard.to_csv(LEADERBOARD_FILE, index=False)
+            st.success("Leaderboard saved to CSV.")
         else:
-            st.success("Leaderboard built successfully!")
-            st.dataframe(leaderboard_df)
+            st.warning("No data to display.")
 
-            # Save leaderboard to CSV for caching/use later
-            leaderboard_df.to_csv(LEADERBOARD_FILE, index=False)
-
-    # Option to refresh leaderboard based on date/time
+    # Auto-refresh leaderboard if conditions met
     if should_refresh():
-        if st.button("Auto Refresh Leaderboard (Tuesday Morning)"):
-            leaderboard_df = build_leaderboard(test_mode=False)
-            leaderboard_df.to_csv(LEADERBOARD_FILE, index=False)
-            st.success("Leaderboard auto-refreshed and saved!")
+        st.info("Auto-refreshing leaderboard due to schedule...")
+        leaderboard = build_leaderboard(test_mode=False)
+        if not leaderboard.empty:
+            leaderboard.to_csv(LEADERBOARD_FILE, index=False)
+            st.experimental_rerun()
 
-    # Show leaderboard from saved file if available
+    # Load and display leaderboard from CSV if available
     if os.path.exists(LEADERBOARD_FILE):
-        cached_df = pd.read_csv(LEADERBOARD_FILE)
-        st.write("Cached Leaderboard:")
-        st.dataframe(cached_df)
+        st.write("### Saved Leaderboard")
+        saved_df = pd.read_csv(LEADERBOARD_FILE)
+        st.dataframe(saved_df)
 
 if __name__ == "__main__":
     main()
