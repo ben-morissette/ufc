@@ -12,59 +12,40 @@ LEADERBOARD_FILE = "rax_leaderboard.csv"
 # -------------------------------
 # RAX calculation logic
 # -------------------------------
-SCORING = {
-    "KO/TKO": 100,
-    "Submission": 90,
-    "Decision - Unanimous": 80,
-    "Decision - Majority": 75,
-    "Decision - Split": 70
-}
-
-FIVE_ROUND_BONUS = 25
-
 def calculate_rax(row):
     rax = 0
-
-    result = str(row.get('result', '')).strip().lower()
-    method = str(row.get('method_main', '')).strip().lower()
-
-    # Normalize method keys for matching
-    scoring_lower = {k.lower(): v for k, v in SCORING.items()}
-
-    # Win points
-    if result == 'win':
-        # Find matching method with partial matching because method may contain extra text
-        method_points = 0
-        for key in scoring_lower.keys():
-            if key in method:
-                method_points = scoring_lower[key]
-                break
-        rax += method_points
-    elif result == 'loss':
+    # Rule 1: Rax based on method_main
+    if row['result'] == 'win':
+        if row['method_main'] == 'KO/TKO':
+            rax += 100
+        elif row['method_main'] == 'Submission':
+            rax += 90
+        elif row['method_main'] == 'Decision - Unanimous':
+            rax += 80
+        elif row['method_main'] == 'Decision - Majority':
+            rax += 75
+        elif row['method_main'] == 'Decision - Split':
+            rax += 70
+    elif row['result'] == 'loss':
         rax += 25
 
-    # Significant strikes difference
-    try:
-        fighter_sig = int(row.get('TOT_fighter_SigStr_landed', 0))
-        opponent_sig = int(row.get('TOT_opponent_SigStr_landed', 0))
-        diff = fighter_sig - opponent_sig
-        if diff > 0:
-            rax += diff
-    except Exception as e:
-        print(f"SigStr parsing error: {e}")
+    # Rule 2: Rax based on significant strike difference
+    sig_str_fighter = 0
+    sig_str_opponent = 0
+    if 'TOT_fighter_SigStr_landed' in row.index and 'TOT_opponent_SigStr_landed' in row.index:
+        sig_str_fighter = row['TOT_fighter_SigStr_landed']
+        sig_str_opponent = row['TOT_opponent_SigStr_landed']
 
-    # 5 round bonus
-    time_format = str(row.get('TimeFormat', ''))
-    if '5 Rnd' in time_format or '5 rounds' in time_format.lower():
-        rax += FIVE_ROUND_BONUS
+    if sig_str_fighter > sig_str_opponent:
+        rax += sig_str_fighter - sig_str_opponent
 
-    # Fight of the Night bonus
-    details = str(row.get('Details', '')).lower()
-    if 'fight of the night' in details:
+    # Rule 3: Bonus for 5-round fights
+    if 'TimeFormat' in row.index and '5 Rnd' in str(row['TimeFormat']):
+        rax += 25
+
+    # Rule 4: Bonus for "Fight of the Night"
+    if 'Details' in row.index and 'Fight of the Night' in str(row['Details']):
         rax += 50
-
-    # Debug print per fight (you can remove this later)
-    print(f"Fight: {row.get('fighter_name', '')} vs {row.get('opponent_name', '')} | Result: {result} | Method: {method} | RAX: {rax}")
 
     return rax
 
