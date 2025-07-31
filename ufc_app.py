@@ -221,7 +221,7 @@ if st.button("Calculate RAX"):
                 # Calculate RAX for each fight
                 fights_df['rax'] = fights_df.apply(calculate_rax, axis=1)
 
-                # Show the dataframe with RAX breakdown
+                # Show the dataframe with RAX breakdown, plus strikes for and against
                 st.write(f"RAX breakdown for {fighter_name}:")
                 st.dataframe(fights_df[[
                     'event_date',
@@ -232,6 +232,8 @@ if st.button("Calculate RAX"):
                     'method_detail',
                     'round',
                     'time_seconds',
+                    'strikes_fighter',
+                    'strikes_opponent',
                     'rax',
                     'fight_link'
                 ]])
