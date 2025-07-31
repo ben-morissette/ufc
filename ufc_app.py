@@ -198,7 +198,6 @@ def calculate_rax(row):
         rax += sig_str_fighter - sig_str_opponent
 
     # Rule 3: Bonus for 5-round fights
-    # We don't have explicit TimeFormat info, but assume round == '5'
     if row['round'] == '5':
         rax += 25
 
@@ -226,5 +225,14 @@ if st.button("Calculate Total RAX"):
             total_rax = fights_df['RAX'].sum()
 
             st.success(f"Total RAX for {fighter_name}: {total_rax}")
+
+            # Show detailed dataframe with RAX breakdown
+            display_cols = [
+                'event_date', 'event_name', 'opponent_name', 'result', 'method_main',
+                'method_detail', 'round', 'time_seconds', 'RAX'
+            ]
+            st.subheader("RAX Breakdown by Fight")
+            st.dataframe(fights_df[display_cols].sort_values(by='event_date', ascending=False).reset_index(drop=True))
+
         except Exception as e:
             st.error(f"Error: {e}")
