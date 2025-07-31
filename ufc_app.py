@@ -125,7 +125,6 @@ def get_fight_links(fighter_url):
         time_val = cols[9].find('p', class_='b-fight-details__table-text')
         time_val = time_val.get_text(strip=True) if time_val else None
 
-        # Convert time_val to seconds if mm:ss
         if time_val and ':' in time_val:
             parts = time_val.split(':')
             if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
@@ -133,9 +132,8 @@ def get_fight_links(fighter_url):
                 total_sec = int(mm)*60 + int(ss)
                 time_val = str(total_sec)
 
-        # Details column might not exist, set empty
-        details = ""  # Could scrape this if available later
-        
+        details = ""  # We will check event_name for FOTN instead
+
         fight_data = {
             'Result': result,
             'Fighter Name': fighter_name,
@@ -155,20 +153,17 @@ def get_fight_links(fighter_url):
             'Round': round_val,
             'Time (seconds)': time_val,
             'Details': details,
-            'Fight Link': fight_url
         }
         
         fights_data.append(fight_data)
-    links = [f['Fight Link'] for f in fights_data]
-    return links, pd.DataFrame(fights_data)
+    return pd.DataFrame(fights_data)
 
-# RAX calculation function
+# RAX calculation function updated to check "Fight of the Night" variants in Event Name
 def calculate_rax(row):
     rax = 0
     result = str(row.get('Result', '')).strip().lower()
     method = str(row.get('Method Main', '')).strip().lower()
     
-    # RAX based on method_main and result
     if result == 'win':
         if method in ['ko', 'tko', 'ko/tko']:
             rax += 100
@@ -183,7 +178,6 @@ def calculate_rax(row):
     elif result == 'loss':
         rax += 25
 
-    # Significant strikes bonus
     try:
         sig_str_fighter = int(row.get('Strikes Fighter', '0'))
         sig_str_opponent = int(row.get('Strikes Opponent', '0'))
@@ -193,15 +187,14 @@ def calculate_rax(row):
 
     if sig_str_fighter > sig_str_opponent:
         rax += sig_str_fighter - sig_str_opponent
-    
-    # Bonus for 5-round fights (round 5 means a 5-round fight)
+
     round_val = str(row.get('Round', ''))
     if round_val == '5':
         rax += 25
 
-    # Bonus for Fight of the Night
-    details = str(row.get('Details', '')).lower()
-    if 'fight of the night' in details:
+    event_name = str(row.get('Event Name', '')).lower()
+    # Check variants of fight of the night in event name
+    if any(phrase in event_name for phrase in ['fight of the night', 'fight of night', 'fight night']):
         rax += 50
 
     return rax
@@ -218,24 +211,18 @@ if st.button("Get Fighter Fights & Calculate RAX"):
             url = get_fighter_url_by_name(fighter_name)
             st.success(f"Found fighter page: {url}")
 
-            fight_links, fights_df = get_fight_links(url)
+            fights_df = get_fight_links(url)
             if fights_df.empty:
                 st.warning("No fights found for this fighter.")
             else:
-                # Calculate RAX for each fight
+                fights_df['Fight Title'] = fights_df['Event Name'].fillna('Unknown Event')
                 fights_df['RAX Earned'] = fights_df.apply(calculate_rax, axis=1)
                 
                 total_rax = fights_df['RAX Earned'].sum()
                 st.markdown(f"### Total RAX earned by {fighter_name}: **{total_rax}**")
                 
-                # Show the detailed dataframe with RAX
                 st.markdown(f"### Fight details with RAX earned per fight")
-                st.dataframe(fights_df)
-
-                # Show clickable links for fights
-                st.markdown("### Fight Links:")
-                for link in fight_links:
-                    st.markdown(f"- [Fight Details]({link})")
+                st.dataframe(fights_df[['Fight Title', 'Result', 'Method Main', 'Round', 'Strikes Fighter', 'Strikes Opponent', 'RAX Earned']])
 
         except Exception as e:
-            st.error(f"Error: {e}")
+            st.error(f"Error: {str(e)}")
