@@ -2,26 +2,40 @@ import streamlit as st
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
+from datetime import datetime, timedelta
+import os
 
-# === Helper functions ===
+CACHE_FILE = 'ufc_rax_leaderboard.csv'
+FIGHTER_LIMIT = 10  # Limit for test runs
 
-def get_fighter_urls(limit=10):
-    # This URL lists fighters alphabetically (default first page)
+def get_last_tuesday(reference_date=None):
+    if reference_date is None:
+        reference_date = datetime.now()
+    days_since_tuesday = (reference_date.weekday() - 1) % 7
+    last_tuesday = reference_date - timedelta(days=days_since_tuesday)
+    return last_tuesday.replace(hour=0, minute=0, second=0, microsecond=0)
+
+def cache_is_fresh():
+    if not os.path.exists(CACHE_FILE):
+        return False
+    mod_time = datetime.fromtimestamp(os.path.getmtime(CACHE_FILE))
+    last_tuesday = get_last_tuesday()
+    return mod_time >= last_tuesday
+
+def get_fighter_urls():
     url = "http://ufcstats.com/statistics/fighters"
     response = requests.get(url)
     response.raise_for_status()
     soup = BeautifulSoup(response.text, 'html.parser')
-    
     table = soup.find('table', class_='b-statistics__table')
     rows = table.find('tbody').find_all('tr', class_='b-statistics__table-row')
-    
     urls = []
-    for row in rows[:limit]:
+    for row in rows:
         name_cell = row.find_all('td')[0]
         link = name_cell.find('a', class_='b-link_style_black')
         if link and link.has_attr('href'):
             urls.append(link['href'])
-    return urls
+    return urls[:FIGHTER_LIMIT]  # LIMIT here for test
 
 def get_two_values_from_col(col):
     ps = col.find_all('p', class_='b-fight-details__table-text')
@@ -36,7 +50,7 @@ def get_fight_data(fighter_url):
 
     table = soup.find('table', class_='b-fight-details__table_type_event-details')
     if not table:
-        return pd.DataFrame()  # No fights found
+        return pd.DataFrame()
     
     rows = table.find('tbody').find_all('tr', class_='b-fight-details__table-row__hover')
     fights_data = []
@@ -83,8 +97,6 @@ def get_fight_data(fighter_url):
         })
     return pd.DataFrame(fights_data)
 
-# === RAX Calculation ===
-
 def calculate_rax(row):
     rax = 0
     if row['Result'] == 'win':
@@ -126,13 +138,12 @@ def calculate_rax(row):
 
     return rax
 
-# === Main leaderboard function ===
-
-def generate_leaderboard(num_fighters=10):
-    fighter_urls = get_fighter_urls(limit=num_fighters)
+def generate_leaderboard():
+    st.info("Generating leaderboard for the first 10 fighters (testing)...")
+    fighter_urls = get_fighter_urls()
     leaderboard = []
 
-    for url in fighter_urls:
+    for idx, url in enumerate(fighter_urls):
         try:
             fights_df = get_fight_data(url)
             if fights_df.empty:
@@ -144,8 +155,9 @@ def generate_leaderboard(num_fighters=10):
                 'Fighter Name': fighter_name,
                 'Total Rax': total_rax,
                 'Fight Count': len(fights_df),
-                'Fights Detail': fights_df
             })
+            if idx % 5 == 0:
+                st.write(f"Processed {idx + 1} fighters...")
         except Exception as e:
             st.warning(f"Error processing fighter {url}: {e}")
             continue
@@ -155,20 +167,19 @@ def generate_leaderboard(num_fighters=10):
         leaderboard_df = leaderboard_df.sort_values(by='Total Rax', ascending=False).reset_index(drop=True)
     return leaderboard_df
 
-# === Streamlit UI ===
+# === Main app ===
 
-st.title("UFC Fighter RAX Leaderboard - Top 10 from API")
+st.title("UFC Fighter RAX Leaderboard (Test with 10 fighters)")
 
-if st.button("Generate Leaderboard Automatically"):
-    leaderboard_df = generate_leaderboard(10)
-    if leaderboard_df.empty:
-        st.write("No data to display.")
+if cache_is_fresh():
+    st.success("Loading leaderboard from cached CSV (updated after last Tuesday).")
+    leaderboard_df = pd.read_csv(CACHE_FILE)
+    st.dataframe(leaderboard_df)
+else:
+    leaderboard_df = generate_leaderboard()
+    if not leaderboard_df.empty:
+        leaderboard_df.to_csv(CACHE_FILE, index=False)
+        st.success("Leaderboard generated and cached.")
+        st.dataframe(leaderboard_df)
     else:
-        st.subheader("Leaderboard")
-        st.dataframe(leaderboard_df[['Fighter Name', 'Total Rax', 'Fight Count']])
-        st.subheader("Fight Breakdown Details")
-        for idx, row in leaderboard_df.iterrows():
-            st.write(f"### {row['Fighter Name']} - Total Rax: {row['Total Rax']}")
-            st.dataframe(row['Fights Detail'][[
-                'Event Name', 'Result', 'Method Main', 'Round', 'Strikes Fighter', 'Strikes Opponent', 'Rax Earned'
-            ]])
+        st.write("No leaderboard data available.")
