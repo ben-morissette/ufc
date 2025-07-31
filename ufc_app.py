@@ -175,37 +175,44 @@ def parse_sig_strikes(strike_str):
 
 def calculate_rax(row):
     rax = 0
-    # Rule 1: Rax based on method_main
     if row['result'] == 'win':
-        if row['method_main'] == 'KO/TKO':
+        method = row['method_main']
+        if method:
+            method = method.strip().lower()
+        else:
+            method = ''
+
+        if method.startswith('ko') or method.startswith('tko'):
             rax += 100
-        elif row['method_main'] == 'Submission':
+        elif method.startswith('submission'):
             rax += 90
-        elif row['method_main'] == 'Decision - Unanimous':
+        elif method == 'decision - unanimous':
             rax += 80
-        elif row['method_main'] == 'Decision - Majority':
+        elif method == 'decision - majority':
             rax += 75
-        elif row['method_main'] == 'Decision - Split':
+        elif method == 'decision - split':
             rax += 70
+        else:
+            # fallback for any other win method, you can adjust this
+            rax += 50
     elif row['result'] == 'loss':
         rax += 25
 
-    # Rule 2: Rax based on significant strike difference
+    # Continue with strike diff etc.
     sig_str_fighter = parse_sig_strikes(row['str_fighter'])
     sig_str_opponent = parse_sig_strikes(row['str_opponent'])
 
     if sig_str_fighter > sig_str_opponent:
         rax += sig_str_fighter - sig_str_opponent
 
-    # Rule 3: Bonus for 5-round fights
     if row['round'] == '5':
         rax += 25
 
-    # Rule 4: Bonus for "Fight of the Night" in method_detail
     if row['method_detail'] and 'Fight of the Night' in row['method_detail']:
         rax += 50
 
     return rax
+
 
 # === Streamlit app ===
 
