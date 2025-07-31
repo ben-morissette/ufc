@@ -132,7 +132,7 @@ def get_fight_links(fighter_url):
                 total_sec = int(mm)*60 + int(ss)
                 time_val = str(total_sec)
 
-        details = ""  # We will check event_name for FOTN instead
+        details = ""  # We check event_name and method_detail for championship
 
         fight_data = {
             'Result': result,
@@ -158,7 +158,6 @@ def get_fight_links(fighter_url):
         fights_data.append(fight_data)
     return pd.DataFrame(fights_data)
 
-# RAX calculation function updated to check "Fight of the Night" variants in Event Name
 def calculate_rax(row):
     rax = 0
     result = str(row.get('Result', '')).strip().lower()
@@ -193,9 +192,15 @@ def calculate_rax(row):
         rax += 25
 
     event_name = str(row.get('Event Name', '')).lower()
-    # Check variants of fight of the night in event name
+    method_detail = str(row.get('Method Detail', '')).lower()
+    
+    # Fight of the night variants
     if any(phrase in event_name for phrase in ['fight of the night', 'fight of night', 'fight night']):
         rax += 50
+
+    # Championship or title fight check
+    if ('championship' in event_name) or ('title' in event_name) or ('championship' in method_detail) or ('title' in method_detail):
+        rax += 25
 
     return rax
 
