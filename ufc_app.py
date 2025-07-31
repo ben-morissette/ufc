@@ -5,6 +5,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 import os
 
+# Constants
 CACHE_FILE = 'ufc_rax_leaderboard.csv'
 FIGHTER_LIMIT = 10
 RARITY_MULTIPLIERS = {
@@ -16,7 +17,7 @@ RARITY_MULTIPLIERS = {
     "Iconic": 6,
 }
 
-# Utilities
+# Utils
 def get_last_tuesday(reference_date=None):
     if reference_date is None:
         reference_date = datetime.now()
@@ -28,6 +29,12 @@ def cache_is_fresh():
         return False
     mod_time = datetime.fromtimestamp(os.path.getmtime(CACHE_FILE))
     return mod_time >= get_last_tuesday()
+
+def safe_int(val):
+    try:
+        return int(val)
+    except:
+        return 0
 
 # Scraper
 def get_fighter_urls():
@@ -90,26 +97,23 @@ def get_fight_data(fighter_url):
 def calculate_rax(row):
     rax = 0
     if row['Result'] == 'win':
-        method = row['Method Main']
-        if method == 'KO/TKO':
+        method = row['Method Main'].lower()
+        if 'ko' in method or 'tko' in method:
             rax += 100
-        elif method in ['Submission', 'SUB']:
+        elif 'submission' in method:
             rax += 90
-        elif method in ['Decision - Unanimous', 'U-DEC']:
+        elif 'unanimous' in method:
             rax += 80
-        elif method == 'Decision - Majority':
+        elif 'majority' in method:
             rax += 75
-        elif method == 'Decision - Split':
+        elif 'split' in method:
             rax += 70
     elif row['Result'] == 'loss':
         rax += 25
 
-    try:
-        strike_diff = int(row['Strikes Fighter']) - int(row['Strikes Opponent'])
-        if strike_diff > 0:
-            rax += strike_diff
-    except:
-        pass
+    strike_diff = safe_int(row['Strikes Fighter']) - safe_int(row['Strikes Opponent'])
+    if strike_diff > 0:
+        rax += strike_diff
 
     if row['Round'] == '5':
         rax += 25
@@ -124,25 +128,29 @@ def calculate_rax(row):
 
 def generate_leaderboard():
     fighter_urls = get_fighter_urls()
+    seen_names = set()
     leaderboard = []
-    for idx, url in enumerate(fighter_urls):
+    for url in fighter_urls:
         try:
             fights_df = get_fight_data(url)
             if fights_df.empty:
                 continue
+            name = fights_df.iloc[0]['Fighter Name']
+            if name in seen_names:
+                continue
+            seen_names.add(name)
             fights_df['Rax Earned'] = fights_df.apply(calculate_rax, axis=1)
             total_rax = fights_df['Rax Earned'].sum()
-            name = fights_df.iloc[0]['Fighter Name']
             leaderboard.append({
                 'Fighter Name': name,
                 'Total Rax': total_rax,
                 'Fight Count': len(fights_df),
             })
-        except Exception as e:
+        except Exception:
             continue
     df = pd.DataFrame(leaderboard)
     df = df.sort_values(by='Total Rax', ascending=False).reset_index(drop=True)
-    df.insert(0, 'Rank', df.index + 1)
+    df = df.assign(Rank=df.index + 1)
     df['Rarity'] = 'Uncommon'
     return df
 
@@ -151,7 +159,8 @@ st.title("UFC Fighter RAX Leaderboard")
 
 if cache_is_fresh():
     leaderboard_df = pd.read_csv(CACHE_FILE)
-    leaderboard_df.insert(0, 'Rank', leaderboard_df.index + 1)
+    leaderboard_df = leaderboard_df.sort_values(by='Total Rax', ascending=False).reset_index(drop=True)
+    leaderboard_df = leaderboard_df.assign(Rank=leaderboard_df.index + 1)
     leaderboard_df['Rarity'] = 'Uncommon'
 else:
     leaderboard_df = generate_leaderboard()
@@ -171,10 +180,19 @@ edited_df = st.data_editor(
     num_rows="fixed"
 )
 
-# Recalculate Total Rax based on selected rarity
+# Apply rarity multiplier and re-rank
 adjusted_df = edited_df.copy()
-adjusted_df['Total Rax'] = adjusted_df.apply(lambda row: round(row['Total Rax'] * RARITY_MULTIPLIERS[row['Rarity']]), 1)
+adjusted_df['Total Rax'] = adjusted_df.apply(
+    lambda row: round(row['Total Rax'] * RARITY_MULTIPLIERS[row['Rarity']]), 1
+, axis=1)
+adjusted_df = adjusted_df.sort_values(by='Total Rax', ascending=False).reset_index(drop=True)
+adjusted_df = adjusted_df.assign(Rank=adjusted_df.index + 1)
 
-# Display final leaderboard
+# Show final leaderboard
 st.markdown("### Adjusted RAX Leaderboard")
-st.dataframe(adjusted_df[['Rank', 'Fighter Name', 'Total Rax', 'Rarity']], use_container_width=True)
+st.dataframe(adjusted_df[['Rank', 'Fighter Name', 'Total Rax', 'Rarity', 'Fight Count']], use_container_width=True)
+
+# Optional: Last updated timestamp
+if cache_is_fresh():
+    mod_time = datetime.fromtimestamp(os.path.getmtime(CACHE_FILE))
+    st.caption(f"Last updated: {mod_time.strftime('%Y-%m-%d %H:%M:%S')}")
