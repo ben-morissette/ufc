@@ -4,8 +4,6 @@ import requests
 from bs4 import BeautifulSoup
 import string
 import time
-from tqdm import tqdm
-import os
 from datetime import datetime
 from difflib import get_close_matches
 
@@ -43,26 +41,6 @@ def calculate_rax(row):
         rax += 50
 
     return rax
-
-# -------------------------------
-def get_fighter_url_by_name(name):
-    url = f"http://ufcstats.com/statistics/fighters?char={name[0].lower()}&page=all"
-    res = requests.get(url)
-    soup = BeautifulSoup(res.text, 'html.parser')
-    table = soup.find('table', class_='b-statistics__table')
-    rows = table.find('tbody').find_all('tr')
-
-    fighter_urls = {}
-    for row in rows:
-        fighter_name = row.find_all('td')[0].text.strip()
-        fighter_link = row.find('a')['href']
-        fighter_urls[fighter_name] = fighter_link
-
-    match = get_close_matches(name, fighter_urls.keys(), n=1, cutoff=0.6)
-    if match:
-        return fighter_urls[match[0]]
-    else:
-        raise ValueError("Fighter not found")
 
 # -------------------------------
 def get_fight_links(fighter_url):
@@ -156,6 +134,7 @@ def transform_columns(df):
 
 # -------------------------------
 def should_refresh():
+    import os
     now = datetime.now()
     is_tuesday = now.weekday() == 1
     is_morning = now.hour < 12
@@ -167,23 +146,29 @@ def should_refresh():
     return is_tuesday and is_morning and last_mod_time.date() < now.date()
 
 # -------------------------------
-def get_all_fighter_links():
+def get_all_fighter_links(progress_bar=None):
     import requests
     from bs4 import BeautifulSoup
+    import string
+    import time
 
     all_links = []
     base_url = "http://ufcstats.com/statistics/fighters?char="
 
-    for letter in tqdm(string.ascii_lowercase, desc="Scraping fighter links"):
+    letters = list(string.ascii_lowercase)
+    if TEST_MODE:
+        letters = letters[:3]  # Just a few letters for test mode
+
+    for i, letter in enumerate(letters):
         url = f"{base_url}{letter}&page=all"
         retries = 3
-        for i in range(retries):
+        for attempt in range(retries):
             try:
                 response = requests.get(url)
                 response.raise_for_status()
                 break
             except requests.exceptions.RequestException as e:
-                print(f"Error fetching {url}: {e}. Retrying ({i+1}/{retries})...")
+                print(f"Error fetching {url}: {e}. Retrying ({attempt+1}/{retries})...")
                 time.sleep(2)
         else:
             print(f"Failed to fetch {url} after {retries} retries.")
@@ -203,23 +188,35 @@ def get_all_fighter_links():
             if link_tag and 'href' in link_tag.attrs:
                 all_links.append(link_tag['href'])
 
+        if progress_bar:
+            progress_bar.progress((i + 1) / len(letters))
+
     return list(set(all_links))
 
 # -------------------------------
-def build_leaderboard():
-    all_links = get_all_fighter_links()
+def build_leaderboard(progress_bar_fighters=None, progress_bar_fights=None):
+    all_links = get_all_fighter_links(progress_bar=None)  # We'll add progress bar below for fighters processing
 
     if TEST_MODE:
         all_links = all_links[:10]
 
     all_fighters_data = []
+    total_fighters = len(all_links)
 
-    for fighter_url in tqdm(all_links, desc="Processing fighters"):
+    for i, fighter_url in enumerate(all_links):
+        if progress_bar_fighters:
+            progress_bar_fighters.progress((i + 1) / total_fighters, text=f"Processing fighter {i+1} / {total_fighters}")
+
         try:
             fight_links, main_df = get_fight_links(fighter_url)
+            total_fights = len(fight_links)
 
             fighter_fight_details = []
-            for fl in fight_links:
+
+            for j, fl in enumerate(fight_links):
+                if progress_bar_fights:
+                    progress_bar_fights.progress((j + 1) / total_fights, text=f"Processing fight {j+1} / {total_fights}")
+
                 row_index = main_df.index[main_df['fight_link'] == fl].tolist()
                 if not row_index:
                     continue
@@ -255,9 +252,26 @@ def main():
     st.set_page_config(page_title="UFC RAX Leaderboard", layout="wide")
     st.title("🏆 UFC RAX Leaderboard")
 
-    if should_refresh() or TEST_MODE:
+    # Add a toggle for test mode in UI for convenience
+    global TEST_MODE
+    TEST_MODE = st.checkbox("Enable Test Mode (limit to 10 fighters)", value=TEST_MODE)
+
+    # Progress bars placeholders
+    fighter_link_progress = st.progress(0, text="Starting fighter links scraping...")
+    fight_processing_progress = st.progress(0, text="Waiting to process fights...")
+
+    refresh_needed = should_refresh() or TEST_MODE
+
+    if refresh_needed:
         st.info("Refreshing leaderboard... This may take a few minutes.")
-        leaderboard_df = build_leaderboard()
+
+        # Update fighter links progress bar during scraping
+        all_links = get_all_fighter_links(progress_bar=fighter_link_progress)
+        if TEST_MODE:
+            all_links = all_links[:10]
+
+        # Process fighters and fights with progress bars
+        leaderboard_df = build_leaderboard(progress_bar_fighters=fighter_link_progress, progress_bar_fights=fight_processing_progress)
         leaderboard_df.to_csv(LEADERBOARD_FILE, index=False)
     else:
         leaderboard_df = pd.read_csv(LEADERBOARD_FILE)
