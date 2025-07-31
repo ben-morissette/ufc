@@ -2,170 +2,173 @@ import streamlit as st
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
-import time
 
-# Helper: Get two values safely from a row (for strikes landed etc.)
-def get_two_values_from_col(row, col1, col2):
-    val1 = row[col1] if col1 in row.index else 0
-    val2 = row[col2] if col2 in row.index else 0
-    try:
-        val1 = int(val1)
-    except:
-        val1 = 0
-    try:
-        val2 = int(val2)
-    except:
-        val2 = 0
-    return val1, val2
+# === Helper functions ===
 
-# Calculate RAX for a single fight row
+def get_fighter_urls(limit=10):
+    # This URL lists fighters alphabetically (default first page)
+    url = "http://ufcstats.com/statistics/fighters"
+    response = requests.get(url)
+    response.raise_for_status()
+    soup = BeautifulSoup(response.text, 'html.parser')
+    
+    table = soup.find('table', class_='b-statistics__table')
+    rows = table.find('tbody').find_all('tr', class_='b-statistics__table-row')
+    
+    urls = []
+    for row in rows[:limit]:
+        name_cell = row.find_all('td')[0]
+        link = name_cell.find('a', class_='b-link_style_black')
+        if link and link.has_attr('href'):
+            urls.append(link['href'])
+    return urls
+
+def get_two_values_from_col(col):
+    ps = col.find_all('p', class_='b-fight-details__table-text')
+    if len(ps) == 2:
+        return ps[0].get_text(strip=True), ps[1].get_text(strip=True)
+    return None, None
+
+def get_fight_data(fighter_url):
+    response = requests.get(fighter_url)
+    response.raise_for_status()
+    soup = BeautifulSoup(response.text, 'html.parser')
+
+    table = soup.find('table', class_='b-fight-details__table_type_event-details')
+    if not table:
+        return pd.DataFrame()  # No fights found
+    
+    rows = table.find('tbody').find_all('tr', class_='b-fight-details__table-row__hover')
+    fights_data = []
+    
+    for row in rows:
+        cols = row.find_all('td', class_='b-fight-details__table-col')
+        
+        result_tag = cols[0].find('p', class_='b-fight-details__table-text')
+        result = result_tag.get_text(strip=True).lower() if result_tag else None
+        
+        fighter_td = cols[1].find_all('p', class_='b-fight-details__table-text')
+        fighter_name = fighter_td[0].get_text(strip=True) if len(fighter_td) > 0 else None
+        opponent_name = fighter_td[1].get_text(strip=True) if len(fighter_td) > 1 else None
+
+        kd_fighter, kd_opponent = get_two_values_from_col(cols[2])
+        str_fighter, str_opponent = get_two_values_from_col(cols[3])
+        td_fighter, td_opponent = get_two_values_from_col(cols[4])
+        sub_fighter, sub_opponent = get_two_values_from_col(cols[5])
+
+        event_td = cols[6].find_all('p', class_='b-fight-details__table-text')
+        event_name = event_td[0].get_text(strip=True) if len(event_td) > 0 else None
+
+        method_td = cols[7].find_all('p', class_='b-fight-details__table-text')
+        method_main = method_td[0].get_text(strip=True) if len(method_td) > 0 else None
+
+        round_val = cols[8].find('p', class_='b-fight-details__table-text')
+        round_val = round_val.get_text(strip=True) if round_val else None
+
+        fights_data.append({
+            'Result': result,
+            'Fighter Name': fighter_name,
+            'Opponent Name': opponent_name,
+            'KD Fighter': kd_fighter,
+            'KD Opponent': kd_opponent,
+            'Strikes Fighter': str_fighter,
+            'Strikes Opponent': str_opponent,
+            'Takedowns Fighter': td_fighter,
+            'Takedowns Opponent': td_opponent,
+            'Submission Attempts Fighter': sub_fighter,
+            'Submission Attempts Opponent': sub_opponent,
+            'Event Name': event_name,
+            'Method Main': method_main,
+            'Round': round_val,
+        })
+    return pd.DataFrame(fights_data)
+
+# === RAX Calculation ===
+
 def calculate_rax(row):
     rax = 0
-
-    # Rule 1: RAX based on method_main and result
-    if 'Result' in row.index:
-        if row['Result'].lower() == 'win':
-            method = str(row.get('method_main', '')).lower()
-            if 'ko/tko' in method:
-                rax += 100
-            elif 'sub' in method or 'submission' in method:
-                rax += 90
-            elif 'u-dec' in method or 'decision - unanimous' in method:
-                rax += 80
-            elif 'm-dec' in method or 'decision - majority' in method:
-                rax += 75
-            elif 's-dec' in method or 'decision - split' in method:
-                rax += 70
-        elif row['Result'].lower() == 'loss':
-            rax += 25
-
-    # Rule 2: RAX for sig strike difference
-    sig_str_fighter, sig_str_opponent = get_two_values_from_col(row, 'TOT_fighter_SigStr_landed', 'TOT_opponent_SigStr_landed')
-    if sig_str_fighter > sig_str_opponent:
-        rax += sig_str_fighter - sig_str_opponent
-
-    # Rule 3: Bonus for 5-round fights (main event or championship)
-    if 'TimeFormat' in row.index and '5 Rnd' in str(row['TimeFormat']):
+    if row['Result'] == 'win':
+        method = row['Method Main']
+        if method == 'KO/TKO':
+            rax += 100
+        elif method in ['Submission', 'SUB']:
+            rax += 90
+        elif method in ['Decision - Unanimous', 'U-DEC']:
+            rax += 80
+        elif method == 'Decision - Majority':
+            rax += 75
+        elif method == 'Decision - Split':
+            rax += 70
+    elif row['Result'] == 'loss':
         rax += 25
 
-    # Rule 4: Bonus for Fight of the Night
-    details = str(row.get('Details', '')).lower()
-    if 'fight of the night' in details or 'fight of night' in details or 'fight of the nigh' in details:
-        rax += 50
+    try:
+        strikes_fighter = int(row['Strikes Fighter'])
+    except:
+        strikes_fighter = 0
+    try:
+        strikes_opponent = int(row['Strikes Opponent'])
+    except:
+        strikes_opponent = 0
 
-    # Rule 5: Bonus for championship fights
-    event = str(row.get('event_name', '')).lower()
-    if 'championship' in event or 'title' in event:
+    strike_diff = strikes_fighter - strikes_opponent
+    if strike_diff > 0:
+        rax += strike_diff
+
+    if row['Round'] == '5':
+        rax += 25
+
+    event_name = row['Event Name'].lower() if row['Event Name'] else ''
+    if 'fight of the night' in event_name or 'fight of night' in event_name:
+        rax += 50
+    if 'championship' in event_name:
         rax += 25
 
     return rax
 
-# Scrape fight data for one fighter from their UFC Stats page
-def get_fight_links(fighter_url):
-    try:
-        res = requests.get(fighter_url)
-        res.raise_for_status()
-    except:
-        return pd.DataFrame()  # Return empty if error
+# === Main leaderboard function ===
 
-    soup = BeautifulSoup(res.text, 'html.parser')
-    tables = soup.find_all('table', class_='b-fight-details__table js-fight-table')
-
-    if not tables:
-        return pd.DataFrame()
-
-    fight_rows = []
-    for table in tables:
-        rows = table.find_all('tr')[1:]  # skip header row
-        for row in rows:
-            cols = row.find_all('td')
-            if len(cols) < 9:
-                continue
-            fight_data = {
-                'date': cols[0].text.strip(),
-                'event_name': cols[1].text.strip(),
-                'result': cols[2].text.strip().lower(),
-                'method_main': cols[3].text.strip(),
-                'Round': cols[4].text.strip(),
-                'Time': cols[5].text.strip(),
-                'TimeFormat': cols[6].text.strip(),
-                'Details': cols[7].text.strip(),
-                'Opponent': cols[8].text.strip(),
-                'Fighter Name': fighter_url.split('/')[-1].replace('-', ' ').title()
-            }
-            fight_rows.append(fight_data)
-
-    df = pd.DataFrame(fight_rows)
-
-    # Now, scrape the detailed stats table for significant strikes
-    # The page has another table with fighter vs opponent significant strikes landed
-    # This requires another step
-
-    # Find stats table with class "b-fight-details__table js-fight-table"
-    stats_table = soup.find('table', class_='b-fight-details__table')
-    if stats_table:
-        sig_cols = ['TOT_fighter_SigStr_landed', 'TOT_opponent_SigStr_landed']
-        # The page has stats per fight, but it's complicated to match row by row in this simple approach
-        # So for now, let's skip this part — we can enhance this later if needed
-
-    # To approximate sig strikes, let's try to parse the fight stats rows under the "STRIKING" section
-    # For now, fill zeros — better to improve with detailed scraping
-
-    df['TOT_fighter_SigStr_landed'] = 0
-    df['TOT_opponent_SigStr_landed'] = 0
-
-    return df
-
-# Scrape the top N fighters from UFC stats fighters page
-def get_top_fighter_links(limit=10):
-    url = "http://ufcstats.com/statistics/fighters"
-    params = {"page": "all"}
-    res = requests.get(url, params=params)
-    res.raise_for_status()
-    soup = BeautifulSoup(res.text, 'html.parser')
-
-    table = soup.find('table', class_='b-statistics__table')
-    if not table:
-        return []
-
-    rows = table.find('tbody').find_all('tr')
-    links = []
-    for row in rows[:limit]:
-        link_tag = row.find('a', href=True)
-        if link_tag:
-            links.append(link_tag['href'])
-    return links
-
-
-st.title("UFC Fighter RAX Leaderboard")
-
-limit = st.number_input("Number of fighters to process", min_value=1, max_value=50, value=10, step=1)
-
-if st.button("Generate Leaderboard"):
-    fighter_links = get_top_fighter_links(limit)
+def generate_leaderboard(num_fighters=10):
+    fighter_urls = get_fighter_urls(limit=num_fighters)
     leaderboard = []
-    progress_bar = st.progress(0)
-    status_text = st.empty()
 
-    for i, fighter_url in enumerate(fighter_links, 1):
+    for url in fighter_urls:
         try:
-            fighter_name = fighter_url.split('/')[-1].replace('-', ' ').title()
-            status_text.text(f"Processing {i}/{limit}: {fighter_name}")
-            fights_df = get_fight_links(fighter_url)
-
+            fights_df = get_fight_data(url)
             if fights_df.empty:
-                total_rax = 0
-            else:
-                fights_df['RAX Earned'] = fights_df.apply(calculate_rax, axis=1)
-                total_rax = fights_df['RAX Earned'].sum()
-
-            leaderboard.append({"Fighter": fighter_name, "Total RAX": total_rax})
+                continue
+            fights_df['Rax Earned'] = fights_df.apply(calculate_rax, axis=1)
+            total_rax = fights_df['Rax Earned'].sum()
+            fighter_name = fights_df.iloc[0]['Fighter Name']
+            leaderboard.append({
+                'Fighter Name': fighter_name,
+                'Total Rax': total_rax,
+                'Fight Count': len(fights_df),
+                'Fights Detail': fights_df
+            })
         except Exception as e:
-            leaderboard.append({"Fighter": fighter_name, "Total RAX": 0})
+            st.warning(f"Error processing fighter {url}: {e}")
+            continue
 
-        progress_bar.progress(i / limit)
-        time.sleep(0.5)
+    leaderboard_df = pd.DataFrame(leaderboard)
+    if not leaderboard_df.empty:
+        leaderboard_df = leaderboard_df.sort_values(by='Total Rax', ascending=False).reset_index(drop=True)
+    return leaderboard_df
 
-    leaderboard_df = pd.DataFrame(leaderboard).sort_values(by="Total RAX", ascending=False).reset_index(drop=True)
-    st.markdown("### RAX Leaderboard")
-    st.dataframe(leaderboard_df)
+# === Streamlit UI ===
+
+st.title("UFC Fighter RAX Leaderboard - Top 10 from API")
+
+if st.button("Generate Leaderboard Automatically"):
+    leaderboard_df = generate_leaderboard(10)
+    if leaderboard_df.empty:
+        st.write("No data to display.")
+    else:
+        st.subheader("Leaderboard")
+        st.dataframe(leaderboard_df[['Fighter Name', 'Total Rax', 'Fight Count']])
+        st.subheader("Fight Breakdown Details")
+        for idx, row in leaderboard_df.iterrows():
+            st.write(f"### {row['Fighter Name']} - Total Rax: {row['Total Rax']}")
+            st.dataframe(row['Fights Detail'][[
+                'Event Name', 'Result', 'Method Main', 'Round', 'Strikes Fighter', 'Strikes Opponent', 'Rax Earned'
+            ]])
