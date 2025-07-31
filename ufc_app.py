@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 import os
 
 CACHE_FILE = 'ufc_rax_leaderboard.csv'
-FIGHTER_LIMIT = 10  # Limit for test runs
+FIGHTER_LIMIT = 10  # test limit
 
 RARITY_FACTORS = {
     "Uncommon": 1.4,
@@ -188,34 +188,49 @@ else:
     if not leaderboard_df.empty:
         leaderboard_df.to_csv(CACHE_FILE, index=False)
         st.success("Leaderboard generated and cached.")
+    else:
+        st.write("No leaderboard data available.")
 
-if leaderboard_df.empty:
-    st.write("No leaderboard data available.")
-else:
-    rarity_choices = list(RARITY_FACTORS.keys())
-    selected_rarities = []
-    adjusted_rax_values = []
+if not leaderboard_df.empty:
+    # Add Rank column
+    leaderboard_df = leaderboard_df.sort_values(by='Total Rax', ascending=False).reset_index(drop=True)
+    leaderboard_df['Rank'] = leaderboard_df.index + 1
 
-    st.write("Select rarity for each fighter to see adjusted Rax:")
+    rarity_selections = []
+    adjusted_rax_list = []
 
-    for i, row in leaderboard_df.iterrows():
-        col1, col2, col3, col4 = st.columns([2, 3, 2, 2])
-        with col1:
-            st.write(f"**{row['Fighter Name']}**")
-        with col2:
-            rarity = st.selectbox(f"Rarity for {row['Fighter Name']}", rarity_choices, key=f"rarity_{i}")
-            selected_rarities.append(rarity)
-        with col3:
-            st.write(row['Total Rax'])
-        with col4:
-            adjusted_rax = row['Total Rax'] * RARITY_FACTORS[rarity]
-            adjusted_rax_values.append(adjusted_rax)
-            st.write(f"{adjusted_rax:.1f}")
+    # Header row
+    col_rank, col_name, col_rax, col_rarity, col_adjusted = st.columns([1, 3, 2, 3, 2])
+    col_rank.markdown("**Rank**")
+    col_name.markdown("**Name**")
+    col_rax.markdown("**Total Rax**")
+    col_rarity.markdown("**Rarity**")
+    col_adjusted.markdown("**Adjusted Rax**")
 
-    # Show a summary table with selections and adjusted Rax
+    # Rows with dropdowns
+    for idx, row in leaderboard_df.iterrows():
+        c_rank, c_name, c_rax, c_rarity, c_adj = st.columns([1, 3, 2, 3, 2])
+        c_rank.write(row['Rank'])
+        c_name.write(row['Fighter Name'])
+        c_rax.write(row['Total Rax'])
+
+        rarity_key = f"rarity_{idx}"
+        rarity = c_rarity.selectbox("", list(RARITY_FACTORS.keys()), key=rarity_key)
+        rarity_selections.append(rarity)
+
+        adjusted_rax = row['Total Rax'] * RARITY_FACTORS[rarity]
+        adjusted_rax_list.append(adjusted_rax)
+        c_adj.write(f"{adjusted_rax:.1f}")
+
+    # Summary table below
     summary_df = leaderboard_df.copy()
-    summary_df['Selected Rarity'] = selected_rarities
-    summary_df['Adjusted Rax'] = adjusted_rax_values
+    summary_df['Rarity'] = rarity_selections
+    summary_df['Adjusted Rax'] = adjusted_rax_list
+    summary_df = summary_df[['Rank', 'Fighter Name', 'Total Rax', 'Rarity', 'Adjusted Rax']]
 
-    st.markdown("### Leaderboard Summary")
-    st.dataframe(summary_df[['Fighter Name', 'Selected Rarity', 'Total Rax', 'Adjusted Rax']])
+    st.markdown("---")
+    st.markdown("### Summary Table")
+    st.dataframe(summary_df)
+
+else:
+    st.warning("No leaderboard data to display yet.")
