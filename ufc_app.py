@@ -4,42 +4,55 @@ import requests
 from bs4 import BeautifulSoup
 import string
 import time
-from tqdm import tqdm
-import numpy as np
 import os
 from datetime import datetime
-from difflib import get_close_matches
 
 LEADERBOARD_FILE = "rax_leaderboard.csv"
 
 # -------------------------------
 # RAX calculation logic
 # -------------------------------
+SCORING = {
+    "KO/TKO": 100,
+    "Submission": 90,
+    "Decision - Unanimous": 80,
+    "Decision - Majority": 75,
+    "Decision - Split": 70
+}
+
+FIVE_ROUND_BONUS = 25
+
 def calculate_rax(row):
     rax = 0
-    if row['result'] == 'win':
-        if row['method_main'] == 'KO/TKO':
-            rax += 100
-        elif row['method_main'] == 'Submission':
-            rax += 90
-        elif row['method_main'] == 'Decision - Unanimous':
-            rax += 80
-        elif row['method_main'] == 'Decision - Majority':
-            rax += 75
-        elif row['method_main'] == 'Decision - Split':
-            rax += 70
-    elif row['result'] == 'loss':
-        rax += 25
 
-    if 'TOT_fighter_SigStr_landed' in row.index and 'TOT_opponent_SigStr_landed' in row.index:
-        diff = row['TOT_fighter_SigStr_landed'] - row['TOT_opponent_SigStr_landed']
+    result = str(row.get('result', '')).lower()
+    method = str(row.get('method_main', '')).strip()
+
+    # Points for win methods
+    if result == 'win':
+        rax += SCORING.get(method, 0)
+    elif result == 'loss':
+        rax += 25  # fixed points for loss
+
+    # Significant strikes difference bonus
+    fighter_sig = row.get('TOT_fighter_SigStr_landed', 0)
+    opponent_sig = row.get('TOT_opponent_SigStr_landed', 0)
+
+    try:
+        diff = int(fighter_sig) - int(opponent_sig)
         if diff > 0:
             rax += diff
+    except Exception:
+        pass  # ignore if parsing fails
 
-    if 'TimeFormat' in row.index and '5 Rnd' in str(row['TimeFormat']):
-        rax += 25
+    # 5 round fight bonus
+    time_format = str(row.get('TimeFormat', ''))
+    if '5 Rnd' in time_format:
+        rax += FIVE_ROUND_BONUS
 
-    if 'Details' in row.index and 'Fight of the Night' in str(row['Details']):
+    # Fight of the night bonus
+    details = str(row.get('Details', ''))
+    if 'Fight of the Night' in details:
         rax += 50
 
     return rax
@@ -85,6 +98,7 @@ def get_all_fighter_links(test_mode=False, progress_bar=None):
 
     # Remove duplicates and sort
     all_links = list(set(all_links))
+    all_links.sort()
 
     # Limit to 10 fighters if test mode is on
     if test_mode:
@@ -101,7 +115,6 @@ def get_fight_links(fighter_url):
     table = soup.find('table', class_='b-fight-details__table')
 
     fight_links = []
-    fighter_names = []
     opponent_names = []
     results = []
     methods = []
@@ -291,10 +304,17 @@ def main():
             # Save leaderboard to CSV for caching/use later
             leaderboard_df.to_csv(LEADERBOARD_FILE, index=False)
 
-    # Optionally load and display existing leaderboard
+    # Option to refresh leaderboard based on date/time
+    if should_refresh():
+        if st.button("Auto Refresh Leaderboard (Tuesday Morning)"):
+            leaderboard_df = build_leaderboard(test_mode=False)
+            leaderboard_df.to_csv(LEADERBOARD_FILE, index=False)
+            st.success("Leaderboard auto-refreshed and saved!")
+
+    # Show leaderboard from saved file if available
     if os.path.exists(LEADERBOARD_FILE):
-        st.markdown("### Cached Leaderboard")
         cached_df = pd.read_csv(LEADERBOARD_FILE)
+        st.write("Cached Leaderboard:")
         st.dataframe(cached_df)
 
 if __name__ == "__main__":
