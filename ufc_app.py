@@ -8,6 +8,15 @@ import os
 CACHE_FILE = 'ufc_rax_leaderboard.csv'
 FIGHTER_LIMIT = 10  # Limit for test runs
 
+RARITY_FACTORS = {
+    "Uncommon": 1.4,
+    "Rare": 1.6,
+    "Epic": 2,
+    "Legendary": 2.5,
+    "Mystic": 4,
+    "Iconic": 6
+}
+
 def get_last_tuesday(reference_date=None):
     if reference_date is None:
         reference_date = datetime.now()
@@ -174,12 +183,39 @@ st.title("UFC Fighter RAX Leaderboard (Test with 10 fighters)")
 if cache_is_fresh():
     st.success("Loading leaderboard from cached CSV (updated after last Tuesday).")
     leaderboard_df = pd.read_csv(CACHE_FILE)
-    st.dataframe(leaderboard_df)
 else:
     leaderboard_df = generate_leaderboard()
     if not leaderboard_df.empty:
         leaderboard_df.to_csv(CACHE_FILE, index=False)
         st.success("Leaderboard generated and cached.")
-        st.dataframe(leaderboard_df)
-    else:
-        st.write("No leaderboard data available.")
+
+if leaderboard_df.empty:
+    st.write("No leaderboard data available.")
+else:
+    rarity_choices = list(RARITY_FACTORS.keys())
+    selected_rarities = []
+    adjusted_rax_values = []
+
+    st.write("Select rarity for each fighter to see adjusted Rax:")
+
+    for i, row in leaderboard_df.iterrows():
+        col1, col2, col3, col4 = st.columns([2, 3, 2, 2])
+        with col1:
+            st.write(f"**{row['Fighter Name']}**")
+        with col2:
+            rarity = st.selectbox(f"Rarity for {row['Fighter Name']}", rarity_choices, key=f"rarity_{i}")
+            selected_rarities.append(rarity)
+        with col3:
+            st.write(row['Total Rax'])
+        with col4:
+            adjusted_rax = row['Total Rax'] * RARITY_FACTORS[rarity]
+            adjusted_rax_values.append(adjusted_rax)
+            st.write(f"{adjusted_rax:.1f}")
+
+    # Show a summary table with selections and adjusted Rax
+    summary_df = leaderboard_df.copy()
+    summary_df['Selected Rarity'] = selected_rarities
+    summary_df['Adjusted Rax'] = adjusted_rax_values
+
+    st.markdown("### Leaderboard Summary")
+    st.dataframe(summary_df[['Fighter Name', 'Selected Rarity', 'Total Rax', 'Adjusted Rax']])
