@@ -4,7 +4,6 @@ import requests
 from bs4 import BeautifulSoup
 import string
 import time
-from tqdm import tqdm
 import numpy as np
 import os
 from datetime import datetime
@@ -43,6 +42,46 @@ def calculate_rax(row):
         rax += 50
 
     return rax
+
+# -------------------------------
+def get_all_fighter_links():
+    all_links = []
+    base_url = "http://ufcstats.com/statistics/fighters?char="
+    progress = st.progress(0)
+    total = len(string.ascii_lowercase)
+
+    for idx, letter in enumerate(string.ascii_lowercase):
+        url = f"{base_url}{letter}&page=all"
+        retries = 3
+        for i in range(retries):
+            try:
+                response = requests.get(url)
+                response.raise_for_status()
+                break
+            except requests.exceptions.RequestException as e:
+                st.warning(f"Error fetching {url}: {e}. Retrying ({i+1}/{retries})...")
+                time.sleep(2)
+        else:
+            st.error(f"Failed to fetch {url} after {retries} retries.")
+            continue
+
+        soup = BeautifulSoup(response.text, 'html.parser')
+        fighter_table = soup.find('table', class_='b-statistics__table')
+        if not fighter_table:
+            continue
+
+        fighter_rows = fighter_table.find('tbody').find_all('tr', class_='b-statistics__table-row')
+        if not fighter_rows:
+            continue
+
+        for row in fighter_rows:
+            link_tag = row.find('a', class_='b-link_style_black')
+            if link_tag and 'href' in link_tag.attrs:
+                all_links.append(link_tag['href'])
+
+        progress.progress((idx + 1) / total)
+
+    return list(set(all_links))
 
 # -------------------------------
 def get_fighter_url_by_name(name):
@@ -171,7 +210,7 @@ def build_leaderboard():
     all_links = get_all_fighter_links()
     all_fighters_data = []
 
-    for fighter_url in tqdm(all_links, desc="Processing fighters"):
+    for fighter_url in all_links:
         try:
             fight_links, main_df = get_fight_links(fighter_url)
             details = [parse_fight_details(f, main_df.loc[main_df['fight_link'] == f]['fighter_name'].values[0],
@@ -183,7 +222,9 @@ def build_leaderboard():
             combined['rax_earned'] = combined.apply(calculate_rax, axis=1)
             total_rax = combined['rax_earned'].sum()
             all_fighters_data.append({'fighter_name': main_df['fighter_name'].iloc[0], 'total_rax': total_rax})
-        except:
+        except Exception as e:
+            # You can uncomment below line to debug errors during scraping
+            # st.write(f"Error processing {fighter_url}: {e}")
             continue
 
     leaderboard = pd.DataFrame(all_fighters_data)
