@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 import os
 
 CACHE_FILE = 'ufc_rax_leaderboard.csv'
-FIGHTER_LIMIT = 10  # Limit for test
+FIGHTER_LIMIT = 10  # Limit for test runs
 
 RARITY_MULTIPLIERS = {
     "Uncommon": 1.4,
@@ -177,12 +177,12 @@ def generate_leaderboard():
         leaderboard_df['Rank'] = leaderboard_df.index + 1
     return leaderboard_df
 
-# === Streamlit App ===
+# === Main app ===
 
-st.title("🏆 UFC Fighter RAX Leaderboard")
+st.title("UFC Fighter RAX Leaderboard (Test with 10 fighters)")
 
 if cache_is_fresh():
-    st.success("Loading leaderboard from cached CSV...")
+    st.success("Loading leaderboard from cached CSV (updated after last Tuesday).")
     leaderboard_df = pd.read_csv(CACHE_FILE)
 else:
     leaderboard_df = generate_leaderboard()
@@ -191,21 +191,34 @@ else:
         st.success("Leaderboard generated and cached.")
 
 if not leaderboard_df.empty:
-    st.markdown("### 🥇 Adjust RAX by Rarity")
-    for idx, row in leaderboard_df.iterrows():
-        with st.container(border=True):
-            cols = st.columns([1, 3, 3, 3])
-            cols[0].markdown(f"<div style='text-align:center; font-weight:bold'>{row['Rank']}</div>", unsafe_allow_html=True)
-            cols[1].markdown(f"<div style='text-align:center'>{row['Fighter Name']}</div>", unsafe_allow_html=True)
+    if 'Rank' not in leaderboard_df.columns:
+        leaderboard_df = leaderboard_df.sort_values(by='Total Rax', ascending=False).reset_index(drop=True)
+        leaderboard_df['Rank'] = leaderboard_df.index + 1
 
-            rarity = cols[3].selectbox(
-                "Rarity",
+    st.markdown("### Leaderboard")
+    for i, row in leaderboard_df.iterrows():
+        with st.container():
+            rarity = st.selectbox(
+                f"Rarity for {row['Fighter Name']} (Rank {int(row['Rank'])})",
                 options=list(RARITY_MULTIPLIERS.keys()),
-                key=f"rarity_{idx}",
-                index=0,
-                label_visibility="collapsed"
+                key=f"rarity_{i}",
+                index=0
             )
             multiplier = RARITY_MULTIPLIERS[rarity]
             adjusted_rax = int(row['Total Rax'] * multiplier)
 
-            cols[2].markdown(f"<div style='text-align:center; font-weight:bold'>{adjusted_rax} RAX</div>", unsafe_allow_html=True)
+            st.markdown(
+                f"""
+                <div style='border: 1px solid #999; border-radius: 10px; padding: 10px; margin-bottom: 10px; background-color: #f9f9f9'>
+                    <div style='display: flex; justify-content: space-between; align-items: center;'>
+                        <div><b>Rank:</b> {row['Rank']}</div>
+                        <div><b>Fighter:</b> {row['Fighter Name']}</div>
+                        <div><b>RAX:</b> {adjusted_rax}</div>
+                        <div style='width: 200px;'>{rarity}</div>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+else:
+    st.write("No leaderboard data available.")
