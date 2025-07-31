@@ -14,29 +14,29 @@ LEADERBOARD_FILE = "rax_leaderboard.csv"
 # -------------------------------
 def calculate_rax(row):
     rax = 0
-    if row['result'] == 'win':
-        if row['method_main'] == 'KO/TKO':
+    if row.get('result') == 'win':
+        if row.get('method_main') == 'KO/TKO':
             rax += 100
-        elif row['method_main'] == 'Submission':
+        elif row.get('method_main') == 'Submission':
             rax += 90
-        elif row['method_main'] == 'Decision - Unanimous':
+        elif row.get('method_main') == 'Decision - Unanimous':
             rax += 80
-        elif row['method_main'] == 'Decision - Majority':
+        elif row.get('method_main') == 'Decision - Majority':
             rax += 75
-        elif row['method_main'] == 'Decision - Split':
+        elif row.get('method_main') == 'Decision - Split':
             rax += 70
-    elif row['result'] == 'loss':
+    elif row.get('result') == 'loss':
         rax += 25
 
-    if 'TOT_fighter_SigStr_landed' in row.index and 'TOT_opponent_SigStr_landed' in row.index:
+    if 'TOT_fighter_SigStr_landed' in row and 'TOT_opponent_SigStr_landed' in row:
         diff = row['TOT_fighter_SigStr_landed'] - row['TOT_opponent_SigStr_landed']
         if diff > 0:
             rax += diff
 
-    if 'TimeFormat' in row.index and '5 Rnd' in str(row['TimeFormat']):
+    if 'TimeFormat' in row and '5 Rnd' in str(row['TimeFormat']):
         rax += 25
 
-    if 'Details' in row.index and 'Fight of the Night' in str(row['Details']):
+    if 'Details' in row and 'Fight of the Night' in str(row['Details']):
         rax += 50
 
     return rax
@@ -45,7 +45,6 @@ def calculate_rax(row):
 def get_all_fighter_links():
     all_links = []
     base_url = "http://ufcstats.com/statistics/fighters?char="
-    max_fighters = 10  # limit to 10 fighters for testing
 
     progress_fighters = st.progress(0)
     status_fighters = st.empty()
@@ -53,7 +52,7 @@ def get_all_fighter_links():
     total_fighters_estimate = 0
     fighters_collected = 0
 
-    # Optional: Estimate total fighters for progress bar
+    # Estimate total fighters for progress bar
     for letter in string.ascii_lowercase:
         url = f"{base_url}{letter}&page=all"
         try:
@@ -70,6 +69,7 @@ def get_all_fighter_links():
     if total_fighters_estimate == 0:
         total_fighters_estimate = len(string.ascii_lowercase) * 10  # fallback guess
 
+    # Actual scraping with progress update
     for letter in string.ascii_lowercase:
         url = f"{base_url}{letter}&page=all"
         retries = 3
@@ -100,18 +100,25 @@ def get_all_fighter_links():
                 all_links.append(link_tag['href'])
                 fighters_collected += 1
                 progress_fighters.progress(min(fighters_collected / total_fighters_estimate, 1.0))
-                status_fighters.text(f"Fighter links collected: {fighters_collected} / {max_fighters}")
-
-                if fighters_collected >= max_fighters:
-                    return list(set(all_links))  # Return early once limit reached
+                status_fighters.text(f"Fighter links collected: {fighters_collected} / {total_fighters_estimate}")
 
     return list(set(all_links))
 
 # -------------------------------
 def get_fight_links(fighter_url):
-    res = requests.get(fighter_url)
+    try:
+        res = requests.get(fighter_url)
+        res.raise_for_status()
+    except Exception as e:
+        st.warning(f"Failed to get fight links for {fighter_url}: {e}")
+        return [], pd.DataFrame()
+
     soup = BeautifulSoup(res.text, 'html.parser')
     table = soup.find('table', class_='b-fight-details__table')
+
+    if not table:
+        st.warning(f"No fights table found for {fighter_url}")
+        return [], pd.DataFrame()
 
     fight_links = []
     opponent_names = []
@@ -120,20 +127,30 @@ def get_fight_links(fighter_url):
 
     for row in table.find('tbody').find_all('tr'):
         columns = row.find_all('td')
+        if len(columns) < 7:
+            continue
         result = columns[0].text.strip().lower()
         opponent = columns[1].text.strip()
         method = columns[6].text.strip()
-        link = columns[6].find('a')['href']
+        link_tag = columns[6].find('a')
+        if link_tag and 'href' in link_tag.attrs:
+            link = link_tag['href']
+        else:
+            link = None
+
+        if link is None:
+            continue
 
         fight_links.append(link)
         results.append(result)
         opponent_names.append(opponent)
         methods.append(method)
 
-    fighter_name = soup.find('span', class_='b-content__title-highlight').text.strip()
+    fighter_name_tag = soup.find('span', class_='b-content__title-highlight')
+    fighter_name = fighter_name_tag.text.strip() if fighter_name_tag else "Unknown"
 
     df = pd.DataFrame({
-        'fighter_name': fighter_name,
+        'fighter_name': [fighter_name]*len(fight_links),
         'opponent_name': opponent_names,
         'result': results,
         'method_main': methods,
@@ -144,7 +161,13 @@ def get_fight_links(fighter_url):
 
 # -------------------------------
 def parse_fight_details(fight_link, fighter_name, opponent_name):
-    res = requests.get(fight_link)
+    try:
+        res = requests.get(fight_link)
+        res.raise_for_status()
+    except Exception as e:
+        st.warning(f"Failed to parse fight details for {fight_link}: {e}")
+        return None
+
     soup = BeautifulSoup(res.text, 'html.parser')
 
     details = {
@@ -159,6 +182,7 @@ def parse_fight_details(fight_link, fighter_name, opponent_name):
     if len(tables) < 2:
         return details
 
+    # Parse Significant Strikes table
     for table in tables:
         if 'Significant Strikes' in table.text:
             rows = table.find_all('tr')
@@ -172,12 +196,11 @@ def parse_fight_details(fight_link, fighter_name, opponent_name):
                 try:
                     fighter_sig = int(fighter_cell.split('of')[0].strip())
                     opponent_sig = int(opponent_cell.split('of')[0].strip())
-                except:
+                    details['TOT_fighter_SigStr_landed'] = fighter_sig
+                    details['TOT_opponent_SigStr_landed'] = opponent_sig
+                    break
+                except Exception:
                     continue
-
-                details['TOT_fighter_SigStr_landed'] = fighter_sig
-                details['TOT_opponent_SigStr_landed'] = opponent_sig
-                break
 
     fight_details = soup.find('p', class_='b-fight-details__text')
     if fight_details:
@@ -209,9 +232,12 @@ def should_refresh():
     return is_tuesday and is_morning and last_mod_time.date() < now.date()
 
 # -------------------------------
-def build_leaderboard():
+def build_leaderboard(limit=10):
     all_links = get_all_fighter_links()
     all_fighters_data = []
+
+    # Limit the number of fighters processed for testing
+    all_links = all_links[:limit]
 
     progress_processed = st.progress(0)
     status_processed = st.empty()
@@ -222,13 +248,31 @@ def build_leaderboard():
     for fighter_url in all_links:
         try:
             fight_links, main_df = get_fight_links(fighter_url)
-            details = [parse_fight_details(f, main_df.loc[main_df['fight_link'] == f]['fighter_name'].values[0],
-                                           main_df.loc[main_df['fight_link'] == f]['opponent_name'].values[0])
-                       for f in fight_links]
+            if main_df.empty:
+                st.warning(f"No fights data for fighter URL: {fighter_url}")
+                continue
+
+            details = []
+            for f_link in fight_links:
+                # Use fighter and opponent names from main_df for this fight
+                fighter_name = main_df.loc[main_df['fight_link'] == f_link, 'fighter_name'].values
+                opponent_name = main_df.loc[main_df['fight_link'] == f_link, 'opponent_name'].values
+                if len(fighter_name) == 0 or len(opponent_name) == 0:
+                    continue
+
+                d = parse_fight_details(f_link, fighter_name[0], opponent_name[0])
+                if d is not None:
+                    details.append(d)
+
+            if not details:
+                st.warning(f"No fight details parsed for fighter URL: {fighter_url}")
+                continue
+
             adv_df = pd.DataFrame(details)
             combined = pd.merge(main_df, adv_df, on='fight_link', how='left')
             combined = transform_columns(combined)
             combined['rax_earned'] = combined.apply(calculate_rax, axis=1)
+
             total_rax = combined['rax_earned'].sum()
             all_fighters_data.append({'fighter_name': main_df['fighter_name'].iloc[0], 'total_rax': total_rax})
 
@@ -237,10 +281,18 @@ def build_leaderboard():
             status_processed.text(f"Fighters fully processed: {fighters_processed} / {total_fighters}")
 
         except Exception as e:
-            # st.warning(f"Error processing {fighter_url}: {e}")
+            st.warning(f"Error processing fighter {fighter_url}: {e}")
             continue
 
+    if not all_fighters_data:
+        st.error("No fighter data collected!")
+        return pd.DataFrame(columns=['Rank', 'fighter_name', 'total_rax'])
+
     leaderboard = pd.DataFrame(all_fighters_data)
+    if 'total_rax' not in leaderboard.columns:
+        st.error("Missing 'total_rax' column in leaderboard data!")
+        return pd.DataFrame(columns=['Rank', 'fighter_name', 'total_rax'])
+
     leaderboard = leaderboard.sort_values(by='total_rax', ascending=False).reset_index(drop=True)
     leaderboard.insert(0, "Rank", leaderboard.index + 1)
     return leaderboard
@@ -252,18 +304,4 @@ def main():
 
     if should_refresh():
         st.info("Refreshing leaderboard... This may take a few minutes.")
-        leaderboard_df = build_leaderboard()
-        leaderboard_df.to_csv(LEADERBOARD_FILE, index=False)
-    else:
-        leaderboard_df = pd.read_csv(LEADERBOARD_FILE)
-
-    search_name = st.text_input("🔍 Search for a fighter:", "").strip().lower()
-    if search_name:
-        filtered = leaderboard_df[leaderboard_df['fighter_name'].str.lower().str.contains(search_name)]
-    else:
-        filtered = leaderboard_df
-
-    st.dataframe(filtered, use_container_width=True)
-
-if __name__ == "__main__":
-    main()
+        leaderboard_df = build_leader
