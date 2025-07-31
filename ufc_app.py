@@ -175,9 +175,9 @@ edited_df = st.data_editor(
     num_rows="fixed"
 )
 
-# Recalculate Total Rax using selected Rarity
+# ✅ FIXED apply round inside lambda
 edited_df['Total Rax'] = edited_df.apply(
-    lambda row: round(row['Base Rax'] * RARITY_MULTIPLIERS[row['Rarity']]), 1,
+    lambda row: round(row['Base Rax'] * RARITY_MULTIPLIERS[row['Rarity']], 1),
     axis=1
 )
 
