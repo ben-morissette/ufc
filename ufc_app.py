@@ -216,7 +216,7 @@ def main():
     st.set_page_config(page_title="UFC RAX Leaderboard", layout="wide")
     st.title("🏆 UFC RAX Leaderboard")
 
-    if should_refresh() or not os.path.exists(LEADERBOARD_FILE):
+    if not os.path.exists(LEADERBOARD_FILE) or should_refresh():
         st.info("Refreshing leaderboard... This may take a few minutes.")
         leaderboard_df = build_leaderboard()
         leaderboard_df.to_csv(LEADERBOARD_FILE, index=False)
