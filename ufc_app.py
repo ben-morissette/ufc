@@ -45,6 +45,7 @@ def calculate_rax(row):
 def get_all_fighter_links():
     all_links = []
     base_url = "http://ufcstats.com/statistics/fighters?char="
+    max_fighters = 10  # limit to 10 fighters for testing
 
     progress_fighters = st.progress(0)
     status_fighters = st.empty()
@@ -52,7 +53,7 @@ def get_all_fighter_links():
     total_fighters_estimate = 0
     fighters_collected = 0
 
-    # First pass: estimate total fighters for progress bar
+    # Optional: Estimate total fighters for progress bar
     for letter in string.ascii_lowercase:
         url = f"{base_url}{letter}&page=all"
         try:
@@ -69,7 +70,6 @@ def get_all_fighter_links():
     if total_fighters_estimate == 0:
         total_fighters_estimate = len(string.ascii_lowercase) * 10  # fallback guess
 
-    # Actual scraping with progress update per fighter link
     for letter in string.ascii_lowercase:
         url = f"{base_url}{letter}&page=all"
         retries = 3
@@ -100,7 +100,10 @@ def get_all_fighter_links():
                 all_links.append(link_tag['href'])
                 fighters_collected += 1
                 progress_fighters.progress(min(fighters_collected / total_fighters_estimate, 1.0))
-                status_fighters.text(f"Fighter links collected: {fighters_collected} / {total_fighters_estimate}")
+                status_fighters.text(f"Fighter links collected: {fighters_collected} / {max_fighters}")
+
+                if fighters_collected >= max_fighters:
+                    return list(set(all_links))  # Return early once limit reached
 
     return list(set(all_links))
 
@@ -208,11 +211,8 @@ def should_refresh():
 # -------------------------------
 def build_leaderboard():
     all_links = get_all_fighter_links()
-    all_links = all_links[:10]  # LIMIT TO 10 FIGHTERS FOR TESTING
-
     all_fighters_data = []
 
-    # Second progress bar for completed fighters fully processed
     progress_processed = st.progress(0)
     status_processed = st.empty()
 
@@ -232,12 +232,12 @@ def build_leaderboard():
             total_rax = combined['rax_earned'].sum()
             all_fighters_data.append({'fighter_name': main_df['fighter_name'].iloc[0], 'total_rax': total_rax})
 
-            # Update processed progress bar & text
             fighters_processed += 1
             progress_processed.progress(fighters_processed / total_fighters)
             status_processed.text(f"Fighters fully processed: {fighters_processed} / {total_fighters}")
 
         except Exception as e:
+            # st.warning(f"Error processing {fighter_url}: {e}")
             continue
 
     leaderboard = pd.DataFrame(all_fighters_data)
