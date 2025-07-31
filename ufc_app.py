@@ -146,7 +146,6 @@ def generate_leaderboard():
     df.insert(0, 'Rank', df.index + 1)
     return df
 
-# Streamlit UI
 st.title("UFC Fighter RAX Leaderboard")
 
 if cache_is_fresh():
@@ -160,13 +159,18 @@ else:
     leaderboard_df = generate_leaderboard()
     leaderboard_df.to_csv(CACHE_FILE, index=False)
 
-# Editable leaderboard
-edited_df = st.data_editor(
-    leaderboard_df,
+# Session state to hold dataframe between runs
+if 'edited_df' not in st.session_state:
+    st.session_state.edited_df = leaderboard_df.copy()
+
+# Editable table for rarity selection + other info
+st.write("Edit the 'Rarity' column and click 'Recalculate Adjusted RAX'")
+
+edited = st.data_editor(
+    st.session_state.edited_df,
     column_config={
         "Rarity": st.column_config.SelectboxColumn(
             "Rarity",
-            help="Choose rarity multiplier",
             options=list(RARITY_MULTIPLIERS.keys()),
             required=True,
         )
@@ -175,15 +179,24 @@ edited_df = st.data_editor(
     num_rows="fixed"
 )
 
-# ✅ FIXED apply round inside lambda
-edited_df['Total Rax'] = edited_df.apply(
-    lambda row: round(row['Base Rax'] * RARITY_MULTIPLIERS[row['Rarity']], 1),
-    axis=1
-)
-
-# Display updated leaderboard
-st.markdown("### Adjusted RAX Leaderboard")
-st.dataframe(
-    edited_df[['Rank', 'Fighter Name', 'Total Rax', 'Rarity', 'Fight Count']],
-    use_container_width=True
-)
+# Button to recalculate Total Rax with updated rarity
+if st.button("Recalculate Adjusted RAX"):
+    # Update session state with user edits
+    st.session_state.edited_df = edited.copy()
+    # Compute adjusted RAX
+    st.session_state.edited_df['Total Rax'] = st.session_state.edited_df.apply(
+        lambda row: round(row['Base Rax'] * RARITY_MULTIPLIERS[row['Rarity']], 1),
+        axis=1
+    )
+    # Show updated table (non-editable)
+    st.success("Adjusted RAX recalculated!")
+    st.dataframe(
+        st.session_state.edited_df[['Rank', 'Fighter Name', 'Total Rax', 'Rarity', 'Fight Count']],
+        use_container_width=True
+    )
+else:
+    # Before recalculation, just show editable table without Total Rax adjusted column
+    st.dataframe(
+        st.session_state.edited_df[['Rank', 'Fighter Name', 'Base Rax', 'Rarity', 'Fight Count']],
+        use_container_width=True
+    )
