@@ -140,36 +140,32 @@ def get_fight_links(fighter_url):
                 total_sec = int(mm)*60 + int(ss)
                 time_val = str(total_sec)
 
-        fight_data = {
-            'Result': result,
-            'Fighter Name': fighter_name,
-            'Opponent Name': opponent_name,
-            'KD Fighter': kd_fighter,
-            'KD Opponent': kd_opponent,
-            'Strikes Fighter': str_fighter,
-            'Strikes Opponent': str_opponent,
-            'Takedowns Fighter': td_fighter,
-            'Takedowns Opponent': td_opponent,
-            'Submission Attempts Fighter': sub_fighter,
-            'Submission Attempts Opponent': sub_opponent,
-            'Event Name': event_name,
-            'Event Date': event_date,
-            'Method Main': method_main,
-            'Method Detail': method_detail,
-            'Round': round_val,
-            'Time (seconds)': time_val,
-            'Fight Link': fight_url
-        }
-        
-        fights_data.append(fight_data)
-    links = [f['Fight Link'] for f in fights_data]
-    return links, pd.DataFrame(fights_data)
+        fights_data.append({
+            'result': result,
+            'fighter_name': fighter_name,
+            'opponent_name': opponent_name,
+            'kd_fighter': kd_fighter,
+            'kd_opponent': kd_opponent,
+            'str_fighter': str_fighter,
+            'str_opponent': str_opponent,
+            'td_fighter': td_fighter,
+            'td_opponent': td_opponent,
+            'sub_fighter': sub_fighter,
+            'sub_opponent': sub_opponent,
+            'event_name': event_name,
+            'event_date': event_date,
+            'method_main': method_main,
+            'method_detail': method_detail,
+            'round': round_val,
+            'time_seconds': time_val,
+            'fight_link': fight_url
+        })
 
-# === RAX Calculation Functions ===
+    return pd.DataFrame(fights_data)
 
+# Helper to parse significant strikes landed from string like "20 of 30"
 def parse_sig_strikes(strike_str):
-    # e.g. "20 of 30" -> 20
-    if not strike_strike_str or 'of' not in strike_str:
+    if not strike_str or 'of' not in strike_str:
         return 0
     try:
         landed = int(strike_str.split('of')[0].strip())
@@ -179,69 +175,56 @@ def parse_sig_strikes(strike_str):
 
 def calculate_rax(row):
     rax = 0
-    
-    result = str(row['Result']).lower()
-    method_main = row.get('Method Main', '')
-
     # Rule 1: Rax based on method_main
-    if result == 'win':
-        if method_main == 'KO/TKO':
+    if row['result'] == 'win':
+        if row['method_main'] == 'KO/TKO':
             rax += 100
-        elif method_main == 'Submission':
+        elif row['method_main'] == 'Submission':
             rax += 90
-        elif method_main == 'Decision - Unanimous':
+        elif row['method_main'] == 'Decision - Unanimous':
             rax += 80
-        elif method_main == 'Decision - Majority':
+        elif row['method_main'] == 'Decision - Majority':
             rax += 75
-        elif method_main == 'Decision - Split':
+        elif row['method_main'] == 'Decision - Split':
             rax += 70
-    elif result == 'loss':
+    elif row['result'] == 'loss':
         rax += 25
 
     # Rule 2: Rax based on significant strike difference
-    sig_str_fighter = parse_sig_strikes(row.get('Strikes Fighter', ''))
-    sig_str_opponent = parse_sig_strikes(row.get('Strikes Opponent', ''))
+    sig_str_fighter = parse_sig_strikes(row['str_fighter'])
+    sig_str_opponent = parse_sig_strikes(row['str_opponent'])
 
     if sig_str_fighter > sig_str_opponent:
-        rax += (sig_str_fighter - sig_str_opponent)
+        rax += sig_str_fighter - sig_str_opponent
 
-    # Rule 3: Bonus for 5-round fights (approximate from Round or Event Name)
-    round_val = str(row.get('Round', ''))
-    event_name = str(row.get('Event Name', ''))
-    if round_val == '5' or '5 Rnd' in event_name:
+    # Rule 3: Bonus for 5-round fights
+    # We don't have explicit TimeFormat info, but assume round == '5'
+    if row['round'] == '5':
         rax += 25
 
-    # Rule 4: Bonus for "Fight of the Night"
-    details = str(row.get('Method Detail', '')) + ' ' + event_name
-    if 'Fight of the Night' in details:
+    # Rule 4: Bonus for "Fight of the Night" in method_detail
+    if row['method_detail'] and 'Fight of the Night' in row['method_detail']:
         rax += 50
 
     return rax
 
 # === Streamlit app ===
 
-st.title("UFC Fighter Fight History Scraper with RAX Points")
+st.title("UFC Fighter RAX Calculator")
 
 fighter_name = st.text_input("Enter UFC Fighter Name", value="Conor McGregor")
 
-if st.button("Get Fighter Fights"):
+if st.button("Calculate Total RAX"):
     with st.spinner(f"Looking up {fighter_name}..."):
         try:
-            url = get_fighter_url_by_name(fighter_name)
-            st.success(f"Found fighter page: {url}")
+            fighter_url = get_fighter_url_by_name(fighter_name)
+            fights_df = get_fight_links(fighter_url)
 
-            fight_links, fights_df = get_fight_links(url)
-            st.write(f"Found {len(fight_links)} fights for {fighter_name}:")
+            # Calculate RAX for each fight
+            fights_df['RAX'] = fights_df.apply(calculate_rax, axis=1)
 
-            # Calculate RAX points for each fight
-            fights_df['RAX Points'] = fights_df.apply(calculate_rax, axis=1)
+            total_rax = fights_df['RAX'].sum()
 
-            st.dataframe(fights_df)
-
-            # Optional: Show clickable links for fights
-            st.markdown("### Fight Links:")
-            for link in fight_links:
-                st.markdown(f"- [Fight Details]({link})")
-
+            st.success(f"Total RAX for {fighter_name}: {total_rax}")
         except Exception as e:
             st.error(f"Error: {e}")
