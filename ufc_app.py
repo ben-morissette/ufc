@@ -195,7 +195,7 @@ def get_all_fighter_links(progress_bar=None):
 
 # -------------------------------
 def build_leaderboard(progress_bar_fighters=None, progress_bar_fights=None):
-    all_links = get_all_fighter_links(progress_bar=None)  # We'll add progress bar below for fighters processing
+    all_links = get_all_fighter_links(progress_bar=None)  # progress bar handled outside
 
     if TEST_MODE:
         all_links = all_links[:10]
@@ -242,10 +242,17 @@ def build_leaderboard(progress_bar_fighters=None, progress_bar_fights=None):
             print(f"Error processing fighter {fighter_url}: {e}")
             continue
 
+    if not all_fighters_data:
+        st.error("No fighter data was scraped. Please check your scraping functions or test mode settings.")
+        return pd.DataFrame(columns=['fighter_name', 'total_rax'])
+
     leaderboard = pd.DataFrame(all_fighters_data)
+    print("all_fighters_data sample:", all_fighters_data[:3])  # Debug
+
     leaderboard = leaderboard.sort_values(by='total_rax', ascending=False).reset_index(drop=True)
     leaderboard.insert(0, "Rank", leaderboard.index + 1)
     return leaderboard
+
 
 # -------------------------------
 def main():
