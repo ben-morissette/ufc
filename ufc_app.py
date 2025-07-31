@@ -4,9 +4,11 @@ import requests
 from bs4 import BeautifulSoup
 import string
 import time
+from tqdm import tqdm
+import numpy as np
+import os
 from datetime import datetime
 from difflib import get_close_matches
-import os
 
 LEADERBOARD_FILE = "rax_leaderboard.csv"
 
@@ -46,31 +48,7 @@ def calculate_rax(row):
 def get_all_fighter_links():
     all_links = []
     base_url = "http://ufcstats.com/statistics/fighters?char="
-
-    progress = st.progress(0)
-    status_text = st.empty()
-
-    total_fighters_estimate = 0
-    fighters_collected = 0
-
-    # First pass: estimate total fighters for progress bar
-    for letter in string.ascii_lowercase:
-        url = f"{base_url}{letter}&page=all"
-        try:
-            response = requests.get(url)
-            response.raise_for_status()
-            soup = BeautifulSoup(response.text, 'html.parser')
-            fighter_table = soup.find('table', class_='b-statistics__table')
-            if fighter_table:
-                rows = fighter_table.find('tbody').find_all('tr', class_='b-statistics__table-row')
-                total_fighters_estimate += len(rows)
-        except requests.RequestException:
-            pass
-
-    if total_fighters_estimate == 0:
-        total_fighters_estimate = len(string.ascii_lowercase) * 10  # fallback guess
-
-    # Actual scraping with progress update per fighter link
+    
     for letter in string.ascii_lowercase:
         url = f"{base_url}{letter}&page=all"
         retries = 3
@@ -80,10 +58,10 @@ def get_all_fighter_links():
                 response.raise_for_status()
                 break
             except requests.exceptions.RequestException as e:
-                st.warning(f"Error fetching {url}: {e}. Retrying ({i+1}/{retries})...")
+                print(f"Error fetching {url}: {e}. Retrying ({i+1}/{retries})...")
                 time.sleep(2)
         else:
-            st.error(f"Failed to fetch {url} after {retries} retries.")
+            print(f"Failed to fetch {url} after {retries} retries.")
             continue
 
         soup = BeautifulSoup(response.text, 'html.parser')
@@ -99,31 +77,8 @@ def get_all_fighter_links():
             link_tag = row.find('a', class_='b-link_style_black')
             if link_tag and 'href' in link_tag.attrs:
                 all_links.append(link_tag['href'])
-                fighters_collected += 1
-                progress.progress(min(fighters_collected / total_fighters_estimate, 1.0))
-                status_text.text(f"Fighters processed: {fighters_collected} / {total_fighters_estimate}")
 
     return list(set(all_links))
-
-# -------------------------------
-def get_fighter_url_by_name(name):
-    url = f"http://ufcstats.com/statistics/fighters?char={name[0].lower()}&page=all"
-    res = requests.get(url)
-    soup = BeautifulSoup(res.text, 'html.parser')
-    table = soup.find('table', class_='b-statistics__table')
-    rows = table.find('tbody').find_all('tr')
-
-    fighter_urls = {}
-    for row in rows:
-        fighter_name = row.find_all('td')[0].text.strip()
-        fighter_link = row.find('a')['href']
-        fighter_urls[fighter_name] = fighter_link
-
-    match = get_close_matches(name, fighter_urls.keys(), n=1, cutoff=0.6)
-    if match:
-        return fighter_urls[match[0]]
-    else:
-        raise ValueError("Fighter not found")
 
 # -------------------------------
 def get_fight_links(fighter_url):
@@ -230,26 +185,58 @@ def should_refresh():
 # -------------------------------
 def build_leaderboard():
     all_links = get_all_fighter_links()
+    all_links = all_links[:10]  # process only first 10 fighters for preview
+
     all_fighters_data = []
+
+    progress_processed = st.progress(0, text="Fighters Processed")
+    progress_complete = st.progress(0, text="Fighters with Complete RAX Data")
+    status_processed = st.empty()
+    status_complete = st.empty()
+
+    total_fighters = len(all_links)
+    fighters_processed = 0
+    fighters_complete = 0
 
     for fighter_url in all_links:
         try:
             fight_links, main_df = get_fight_links(fighter_url)
-            details = [parse_fight_details(f, main_df.loc[main_df['fight_link'] == f]['fighter_name'].values[0],
-                                           main_df.loc[main_df['fight_link'] == f]['opponent_name'].values[0])
-                       for f in fight_links]
+            details = [parse_fight_details(
+                f,
+                main_df.loc[main_df['fight_link'] == f]['fighter_name'].values[0],
+                main_df.loc[main_df['fight_link'] == f]['opponent_name'].values[0]
+            ) for f in fight_links]
+
             adv_df = pd.DataFrame(details)
             combined = pd.merge(main_df, adv_df, on='fight_link', how='left')
             combined = transform_columns(combined)
-            combined['rax_earned'] = combined.apply(calculate_rax, axis=1)
-            total_rax = combined['rax_earned'].sum()
-            all_fighters_data.append({'fighter_name': main_df['fighter_name'].iloc[0], 'total_rax': total_rax})
-        except:
-            continue
+
+            # Check if this fighter has any fights with required info for RAX
+            if combined['TOT_fighter_SigStr_landed'].sum() > 0 and combined['TOT_opponent_SigStr_landed'].sum() > 0:
+                combined['rax_earned'] = combined.apply(calculate_rax, axis=1)
+                total_rax = combined['rax_earned'].sum()
+                all_fighters_data.append({'fighter_name': main_df['fighter_name'].iloc[0], 'total_rax': total_rax})
+                fighters_complete += 1
+
+        except Exception as e:
+            # Optionally log error or skip quietly
+            pass
+
+        fighters_processed += 1
+
+        # Update progress bars and counters
+        progress_processed.progress(fighters_processed / total_fighters)
+        progress_complete.progress(fighters_complete / total_fighters)
+        status_processed.text(f"Fighters processed: {fighters_processed} / {total_fighters}")
+        status_complete.text(f"Fighters with complete RAX data: {fighters_complete} / {total_fighters}")
 
     leaderboard = pd.DataFrame(all_fighters_data)
-    leaderboard = leaderboard.sort_values(by='total_rax', ascending=False).reset_index(drop=True)
-    leaderboard.insert(0, "Rank", leaderboard.index + 1)
+    if not leaderboard.empty:
+        leaderboard = leaderboard.sort_values(by='total_rax', ascending=False).reset_index(drop=True)
+        leaderboard.insert(0, "Rank", leaderboard.index + 1)
+    else:
+        leaderboard = pd.DataFrame(columns=['Rank', 'fighter_name', 'total_rax'])
+
     return leaderboard
 
 # -------------------------------
