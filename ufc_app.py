@@ -175,40 +175,44 @@ def parse_sig_strikes(strike_str):
 
 def calculate_rax(row):
     rax = 0
-    if row['result'] == 'win':
-        method = row['method_main']
+    if row['Result'] and row['Result'].lower() == 'win':
+        method = row['Method Main']
         if method:
             method = method.strip().lower()
         else:
             method = ''
 
-        if method.startswith('ko') or method.startswith('tko'):
+        if method in ['ko', 'tko', 'ko/tko']:
             rax += 100
-        elif method.startswith('submission'):
+        elif method in ['sub', 'submission', 'submission attempts']:
             rax += 90
-        elif method == 'decision - unanimous':
+        elif method in ['u-dec', 'decision - unanimous', 'decision unanimous']:
             rax += 80
-        elif method == 'decision - majority':
+        elif method in ['m-dec', 'decision - majority', 'decision majority']:
             rax += 75
-        elif method == 'decision - split':
+        elif method in ['s-dec', 'decision - split', 'decision split']:
             rax += 70
-        else:
-            # fallback for any other win method, you can adjust this
-            rax += 50
-    elif row['result'] == 'loss':
+        # No fallback: if no match, no points added for method
+
+    elif row['Result'] and row['Result'].lower() == 'loss':
         rax += 25
 
-    # Continue with strike diff etc.
-    sig_str_fighter = parse_sig_strikes(row['str_fighter'])
-    sig_str_opponent = parse_sig_strikes(row['str_opponent'])
+    try:
+        sig_str_fighter = int(row.get('Strikes Fighter', '0'))
+    except:
+        sig_str_fighter = 0
+    try:
+        sig_str_opponent = int(row.get('Strikes Opponent', '0'))
+    except:
+        sig_str_opponent = 0
 
     if sig_str_fighter > sig_str_opponent:
         rax += sig_str_fighter - sig_str_opponent
 
-    if row['round'] == '5':
+    if row.get('Round', '') == '5':
         rax += 25
 
-    if row['method_detail'] and 'Fight of the Night' in row['method_detail']:
+    if row.get('Method Detail') and 'Fight of the Night' in row['Method Detail']:
         rax += 50
 
     return rax
