@@ -183,8 +183,9 @@ edited_df = st.data_editor(
 # Apply rarity multiplier and re-rank
 adjusted_df = edited_df.copy()
 adjusted_df['Total Rax'] = adjusted_df.apply(
-    lambda row: round(row['Total Rax'] * RARITY_MULTIPLIERS[row['Rarity']]), 1
-, axis=1)
+    lambda row: round(row['Total Rax'] * RARITY_MULTIPLIERS[row['Rarity']], 1),
+    axis=1
+)
 adjusted_df = adjusted_df.sort_values(by='Total Rax', ascending=False).reset_index(drop=True)
 adjusted_df = adjusted_df.assign(Rank=adjusted_df.index + 1)
 
