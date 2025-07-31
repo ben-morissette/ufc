@@ -167,10 +167,10 @@ def get_fight_links(fighter_url):
 
 def calculate_rax(row):
     rax = 0
-    result = row.get('result', '').lower()
-    method = row.get('method_main', '').strip().lower()
-
-    # Map method_main strings for RAX logic
+    result = str(row.get('Result', '')).strip().lower()
+    method = str(row.get('Method Main', '')).strip().lower()
+    
+    # RAX based on method_main and result
     if result == 'win':
         if method in ['ko', 'tko', 'ko/tko']:
             rax += 100
@@ -185,32 +185,26 @@ def calculate_rax(row):
     elif result == 'loss':
         rax += 25
 
-    # Handle significant strikes safely
-    try:
-        sig_str_fighter = int(row.get('strikes_fighter', '0'))
-    except:
-        sig_str_fighter = 0
-    try:
-        sig_str_opponent = int(row.get('strikes_opponent', '0'))
-    except:
-        sig_str_opponent = 0
-
-    rax_strikes_bonus = 0
+    # Significant strikes bonus
+    sig_str_fighter = int(row.get('Strikes Fighter', '0'))
+    sig_str_opponent = int(row.get('Strikes Opponent', '0'))
     if sig_str_fighter > sig_str_opponent:
-        rax_strikes_bonus = sig_str_fighter - sig_str_opponent
-        rax += rax_strikes_bonus
-
-    try:
-        round_val = int(row.get('round', '0'))
-    except:
-        round_val = 0
-    if round_val == 5:
+        rax += sig_str_fighter - sig_str_opponent
+    
+    # Bonus for 5-round fights
+    round_val = str(row.get('Round', ''))
+    time_format = str(row.get('Time (seconds)', ''))
+    # Assuming round 5 means a 5-round fight, alternatively check TimeFormat if available
+    if round_val == '5':
         rax += 25
 
-    if 'fight of the night' in row.get('method_detail', '').lower():
+    # Bonus for Fight of the Night
+    details = str(row.get('Details', '')).lower()
+    if 'fight of the night' in details:
         rax += 50
 
-    return pd.Series([rax, rax_strikes_bonus])
+    return rax
+
 
 
 # === Streamlit app ===
