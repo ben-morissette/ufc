@@ -4,10 +4,9 @@ import requests
 from bs4 import BeautifulSoup
 import string
 import time
-import numpy as np
-import os
 from datetime import datetime
 from difflib import get_close_matches
+import os
 
 LEADERBOARD_FILE = "rax_leaderboard.csv"
 
@@ -47,10 +46,31 @@ def calculate_rax(row):
 def get_all_fighter_links():
     all_links = []
     base_url = "http://ufcstats.com/statistics/fighters?char="
-    progress = st.progress(0)
-    total = len(string.ascii_lowercase)
 
-    for idx, letter in enumerate(string.ascii_lowercase):
+    progress = st.progress(0)
+
+    total_fighters_estimate = 0
+    fighters_collected = 0
+
+    # First pass: estimate total fighters for progress bar
+    for letter in string.ascii_lowercase:
+        url = f"{base_url}{letter}&page=all"
+        try:
+            response = requests.get(url)
+            response.raise_for_status()
+            soup = BeautifulSoup(response.text, 'html.parser')
+            fighter_table = soup.find('table', class_='b-statistics__table')
+            if fighter_table:
+                rows = fighter_table.find('tbody').find_all('tr', class_='b-statistics__table-row')
+                total_fighters_estimate += len(rows)
+        except requests.RequestException:
+            pass
+
+    if total_fighters_estimate == 0:
+        total_fighters_estimate = len(string.ascii_lowercase) * 10  # fallback guess
+
+    # Actual scraping with progress update per fighter link
+    for letter in string.ascii_lowercase:
         url = f"{base_url}{letter}&page=all"
         retries = 3
         for i in range(retries):
@@ -78,8 +98,8 @@ def get_all_fighter_links():
             link_tag = row.find('a', class_='b-link_style_black')
             if link_tag and 'href' in link_tag.attrs:
                 all_links.append(link_tag['href'])
-
-        progress.progress((idx + 1) / total)
+                fighters_collected += 1
+                progress.progress(min(fighters_collected / total_fighters_estimate, 1.0))
 
     return list(set(all_links))
 
@@ -222,9 +242,7 @@ def build_leaderboard():
             combined['rax_earned'] = combined.apply(calculate_rax, axis=1)
             total_rax = combined['rax_earned'].sum()
             all_fighters_data.append({'fighter_name': main_df['fighter_name'].iloc[0], 'total_rax': total_rax})
-        except Exception as e:
-            # You can uncomment below line to debug errors during scraping
-            # st.write(f"Error processing {fighter_url}: {e}")
+        except:
             continue
 
     leaderboard = pd.DataFrame(all_fighters_data)
