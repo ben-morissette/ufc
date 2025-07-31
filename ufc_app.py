@@ -81,30 +81,37 @@ def get_two_values_from_col(col):
         return ps[0].get_text(strip=True), ps[1].get_text(strip=True)
     return None, None
 
+def ctrl_to_seconds(x):
+    if x and ':' in x:
+        m, s = x.split(':')
+        if m.isdigit() and s.isdigit():
+            return str(int(m)*60 + int(s))
+    return x
+
 def get_fight_links(fighter_url):
     response = requests.get(fighter_url)
     response.raise_for_status()
     soup = BeautifulSoup(response.text, 'html.parser')
-    
+
     table = soup.find('table', class_='b-fight-details__table_type_event-details')
     if not table:
         raise Exception("No fight details table found on the fighter page.")
-    
+
     rows = table.find('tbody').find_all('tr', class_='b-fight-details__table-row__hover')
     fights_data = []
-    
+
     for row in rows:
         fight_url = row.get('data-link')
         if not fight_url:
             continue
-        
+
         cols = row.find_all('td', class_='b-fight-details__table-col')
         result_tag = cols[0].find('p', class_='b-fight-details__table-text')
-        result = result_tag.get_text(strip=True).lower() if result_tag else ''
+        result = result_tag.get_text(strip=True).lower() if result_tag else None
 
         fighter_td = cols[1].find_all('p', class_='b-fight-details__table-text')
-        fighter_name = fighter_td[0].get_text(strip=True) if len(fighter_td) > 0 else ''
-        opponent_name = fighter_td[1].get_text(strip=True) if len(fighter_td) > 1 else ''
+        fighter_name = fighter_td[0].get_text(strip=True) if len(fighter_td) > 0 else None
+        opponent_name = fighter_td[1].get_text(strip=True) if len(fighter_td) > 1 else None
 
         kd_fighter, kd_opponent = get_two_values_from_col(cols[2])
         str_fighter, str_opponent = get_two_values_from_col(cols[3])
@@ -112,18 +119,18 @@ def get_fight_links(fighter_url):
         sub_fighter, sub_opponent = get_two_values_from_col(cols[5])
 
         event_td = cols[6].find_all('p', class_='b-fight-details__table-text')
-        event_name = event_td[0].get_text(strip=True) if len(event_td) > 0 else ''
-        event_date = event_td[1].get_text(strip=True) if len(event_td) > 1 else ''
+        event_name = event_td[0].get_text(strip=True) if len(event_td) > 0 else None
+        event_date = event_td[1].get_text(strip=True) if len(event_td) > 1 else None
 
         method_td = cols[7].find_all('p', class_='b-fight-details__table-text')
-        method_main = method_td[0].get_text(strip=True) if len(method_td) > 0 else ''
-        method_detail = method_td[1].get_text(strip=True) if len(method_td) > 1 else ''
+        method_main = method_td[0].get_text(strip=True) if len(method_td) > 0 else None
+        method_detail = method_td[1].get_text(strip=True) if len(method_td) > 1 else None
 
         round_val = cols[8].find('p', class_='b-fight-details__table-text')
-        round_val = round_val.get_text(strip=True) if round_val else ''
+        round_val = round_val.get_text(strip=True) if round_val else None
 
         time_val = cols[9].find('p', class_='b-fight-details__table-text')
-        time_val = time_val.get_text(strip=True) if time_val else ''
+        time_val = time_val.get_text(strip=True) if time_val else None
 
         # Convert time_val to seconds if mm:ss
         if time_val and ':' in time_val:
@@ -133,7 +140,7 @@ def get_fight_links(fighter_url):
                 total_sec = int(mm)*60 + int(ss)
                 time_val = str(total_sec)
 
-        fight_data = {
+        fights_data.append({
             'result': result,
             'fighter_name': fighter_name,
             'opponent_name': opponent_name,
@@ -141,10 +148,10 @@ def get_fight_links(fighter_url):
             'kd_opponent': kd_opponent,
             'strikes_fighter': str_fighter,
             'strikes_opponent': str_opponent,
-            'takedowns_fighter': td_fighter,
-            'takedowns_opponent': td_opponent,
-            'submission_attempts_fighter': sub_fighter,
-            'submission_attempts_opponent': sub_opponent,
+            'td_fighter': td_fighter,
+            'td_opponent': td_opponent,
+            'sub_fighter': sub_fighter,
+            'sub_opponent': sub_opponent,
             'event_name': event_name,
             'event_date': event_date,
             'method_main': method_main,
@@ -152,20 +159,18 @@ def get_fight_links(fighter_url):
             'round': round_val,
             'time_seconds': time_val,
             'fight_link': fight_url
-        }
-        
-        fights_data.append(fight_data)
-    
-    df = pd.DataFrame(fights_data)
-    return df
+        })
 
-# === RAX Calculation ===
+    links = [f['fight_link'] for f in fights_data]
+    return links, pd.DataFrame(fights_data)
+
 
 def calculate_rax(row):
     rax = 0
     result = row.get('result', '').lower()
     method = row.get('method_main', '').strip().lower()
 
+    # Map method_main strings for RAX logic
     if result == 'win':
         if method in ['ko', 'tko', 'ko/tko']:
             rax += 100
@@ -180,6 +185,7 @@ def calculate_rax(row):
     elif result == 'loss':
         rax += 25
 
+    # Handle significant strikes safely
     try:
         sig_str_fighter = int(row.get('strikes_fighter', '0'))
     except:
@@ -189,8 +195,10 @@ def calculate_rax(row):
     except:
         sig_str_opponent = 0
 
+    rax_strikes_bonus = 0
     if sig_str_fighter > sig_str_opponent:
-        rax += sig_str_fighter - sig_str_opponent
+        rax_strikes_bonus = sig_str_fighter - sig_str_opponent
+        rax += rax_strikes_bonus
 
     try:
         round_val = int(row.get('round', '0'))
@@ -202,28 +210,29 @@ def calculate_rax(row):
     if 'fight of the night' in row.get('method_detail', '').lower():
         rax += 50
 
-    return rax
+    return pd.Series([rax, rax_strikes_bonus])
+
 
 # === Streamlit app ===
 
-st.title("UFC Fighter Fight History & RAX Calculator")
+st.title("UFC Fighter Fight History Scraper with RAX Calculation")
 
 fighter_name = st.text_input("Enter UFC Fighter Name", value="Conor McGregor")
 
-if st.button("Calculate RAX"):
+if st.button("Get Fighter Fights and Calculate RAX"):
     with st.spinner(f"Looking up {fighter_name}..."):
         try:
             url = get_fighter_url_by_name(fighter_name)
-            fights_df = get_fight_links(url)
-            if fights_df.empty:
-                st.warning("No fights found for this fighter.")
-            else:
-                # Calculate RAX for each fight
-                fights_df['rax'] = fights_df.apply(calculate_rax, axis=1)
+            fight_links, fights_df = get_fight_links(url)
 
-                # Show the dataframe with RAX breakdown, plus strikes for and against
-                st.write(f"RAX breakdown for {fighter_name}:")
-                st.dataframe(fights_df[[
+            if fights_df.empty:
+                st.warning(f"No fight data found for {fighter_name}.")
+            else:
+                # Calculate RAX and strikes bonus columns
+                fights_df[['rax', 'rax_strikes_bonus']] = fights_df.apply(calculate_rax, axis=1)
+
+                # Show the dataframe with RAX breakdown and strikes
+                display_cols = [
                     'event_date',
                     'event_name',
                     'opponent_name',
@@ -234,12 +243,14 @@ if st.button("Calculate RAX"):
                     'time_seconds',
                     'strikes_fighter',
                     'strikes_opponent',
+                    'rax_strikes_bonus',
                     'rax',
                     'fight_link'
-                ]])
+                ]
+                st.dataframe(fights_df[display_cols])
 
                 total_rax = fights_df['rax'].sum()
-                st.success(f"Total RAX for {fighter_name}: {total_rax}")
+                st.success(f"Total RAX earned by {fighter_name}: {total_rax}")
 
         except Exception as e:
             st.error(f"Error: {e}")
