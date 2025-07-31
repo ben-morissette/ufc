@@ -14,12 +14,10 @@ LEADERBOARD_FILE = "rax_leaderboard.csv"
 # -------------------------------
 def calculate_rax(row):
     rax = 0
-
+    
+    # Normalize result and method strings
     result = str(row.get('result', '')).strip().lower()
     method = str(row.get('method_main', '')).strip().lower()
-
-    # Debug prints (remove/comment out after testing)
-    # print(f"Result: '{result}', Method: '{method}'")
 
     if result == 'win':
         if 'ko/tko' in method:
@@ -33,30 +31,27 @@ def calculate_rax(row):
         elif 'decision - split' in method:
             rax += 70
         else:
-            # If method doesn't match any known type, assign a default win value
-            rax += 60  # Or 0 if you prefer
+            rax += 60  # fallback points for other wins
     elif result == 'loss':
         rax += 25
 
-    try:
-        sig_str_fighter = int(row.get('TOT_fighter_SigStr_landed', 0))
-        sig_str_opponent = int(row.get('TOT_opponent_SigStr_landed', 0))
-    except Exception:
-        sig_str_fighter = 0
-        sig_str_opponent = 0
+    # Strike difference bonus
+    sig_str_fighter = int(row.get('TOT_fighter_SigStr_landed', 0))
+    sig_str_opponent = int(row.get('TOT_opponent_SigStr_landed', 0))
 
     if sig_str_fighter > sig_str_opponent:
         rax += sig_str_fighter - sig_str_opponent
 
-    time_format = str(row.get('TimeFormat', '')).lower()
-    if '5 rnd' in time_format:
+    # 5-round fight bonus
+    if '5 rnd' in str(row.get('TimeFormat', '')).lower():
         rax += 25
 
-    details = str(row.get('Details', '')).lower()
-    if 'fight of the night' in details:
+    # Fight of the night bonus
+    if 'fight of the night' in str(row.get('Details', '')).lower():
         rax += 50
 
     return rax
+
 
 
 # -------------------------------
