@@ -135,14 +135,14 @@ def generate_leaderboard():
             name = fights_df.iloc[0]['Fighter Name']
             leaderboard.append({
                 'Fighter Name': name,
-                'Total Rax': total_rax,
+                'Base Rax': total_rax,
                 'Fight Count': len(fights_df),
+                'Rarity': 'Uncommon',
             })
         except Exception as e:
             continue
     df = pd.DataFrame(leaderboard)
-    df = df.sort_values(by='Total Rax', ascending=False).reset_index(drop=True)
-    df['Rarity'] = 'Uncommon'
+    df = df.sort_values(by='Base Rax', ascending=False).reset_index(drop=True)
     df.insert(0, 'Rank', df.index + 1)
     return df
 
@@ -155,16 +155,18 @@ if cache_is_fresh():
         leaderboard_df.drop(columns=['Rank'], inplace=True)
     leaderboard_df.insert(0, 'Rank', leaderboard_df.index + 1)
     leaderboard_df['Rarity'] = 'Uncommon'
+    leaderboard_df.rename(columns={'Total Rax': 'Base Rax'}, inplace=True, errors='ignore')
 else:
     leaderboard_df = generate_leaderboard()
     leaderboard_df.to_csv(CACHE_FILE, index=False)
 
+# Editable leaderboard
 edited_df = st.data_editor(
     leaderboard_df,
     column_config={
         "Rarity": st.column_config.SelectboxColumn(
             "Rarity",
-            help="Select rarity multiplier",
+            help="Choose rarity multiplier",
             options=list(RARITY_MULTIPLIERS.keys()),
             required=True,
         )
@@ -173,12 +175,15 @@ edited_df = st.data_editor(
     num_rows="fixed"
 )
 
-# Recalculate Total Rax based on selected rarity
-adjusted_df = edited_df.copy()
-adjusted_df['Total Rax'] = adjusted_df.apply(
-    lambda row: round(row['Total Rax'] * RARITY_MULTIPLIERS[row['Rarity']]), 1
+# Recalculate Total Rax using selected Rarity
+edited_df['Total Rax'] = edited_df.apply(
+    lambda row: round(row['Base Rax'] * RARITY_MULTIPLIERS[row['Rarity']]), 1,
+    axis=1
 )
 
-# Display final leaderboard
+# Display updated leaderboard
 st.markdown("### Adjusted RAX Leaderboard")
-st.dataframe(adjusted_df[['Rank', 'Fighter Name', 'Total Rax', 'Rarity']], use_container_width=True)
+st.dataframe(
+    edited_df[['Rank', 'Fighter Name', 'Total Rax', 'Rarity', 'Fight Count']],
+    use_container_width=True
+)
