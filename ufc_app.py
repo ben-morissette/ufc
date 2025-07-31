@@ -5,7 +5,6 @@ from bs4 import BeautifulSoup
 import string
 import time
 from datetime import datetime
-from difflib import get_close_matches
 import os
 
 LEADERBOARD_FILE = "rax_leaderboard.csv"
@@ -112,7 +111,6 @@ def get_fight_links(fighter_url):
     table = soup.find('table', class_='b-fight-details__table')
 
     fight_links = []
-    fighter_names = []
     opponent_names = []
     results = []
     methods = []
@@ -210,6 +208,8 @@ def should_refresh():
 # -------------------------------
 def build_leaderboard():
     all_links = get_all_fighter_links()
+    all_links = all_links[:10]  # LIMIT TO 10 FIGHTERS FOR TESTING
+
     all_fighters_data = []
 
     # Second progress bar for completed fighters fully processed
@@ -238,8 +238,6 @@ def build_leaderboard():
             status_processed.text(f"Fighters fully processed: {fighters_processed} / {total_fighters}")
 
         except Exception as e:
-            # You can uncomment below to debug errors
-            # st.warning(f"Error processing {fighter_url}: {e}")
             continue
 
     leaderboard = pd.DataFrame(all_fighters_data)
