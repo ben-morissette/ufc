@@ -48,6 +48,7 @@ def get_all_fighter_links():
     base_url = "http://ufcstats.com/statistics/fighters?char="
 
     progress = st.progress(0)
+    status_text = st.empty()
 
     total_fighters_estimate = 0
     fighters_collected = 0
@@ -100,6 +101,7 @@ def get_all_fighter_links():
                 all_links.append(link_tag['href'])
                 fighters_collected += 1
                 progress.progress(min(fighters_collected / total_fighters_estimate, 1.0))
+                status_text.text(f"Fighters processed: {fighters_collected} / {total_fighters_estimate}")
 
     return list(set(all_links))
 
