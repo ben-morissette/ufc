@@ -142,8 +142,8 @@ def generate_leaderboard():
             continue
     df = pd.DataFrame(leaderboard)
     df = df.sort_values(by='Total Rax', ascending=False).reset_index(drop=True)
-    df.insert(0, 'Rank', df.index + 1)
     df['Rarity'] = 'Uncommon'
+    df.insert(0, 'Rank', df.index + 1)
     return df
 
 # Streamlit UI
@@ -151,6 +151,8 @@ st.title("UFC Fighter RAX Leaderboard")
 
 if cache_is_fresh():
     leaderboard_df = pd.read_csv(CACHE_FILE)
+    if 'Rank' in leaderboard_df.columns:
+        leaderboard_df.drop(columns=['Rank'], inplace=True)
     leaderboard_df.insert(0, 'Rank', leaderboard_df.index + 1)
     leaderboard_df['Rarity'] = 'Uncommon'
 else:
@@ -173,7 +175,9 @@ edited_df = st.data_editor(
 
 # Recalculate Total Rax based on selected rarity
 adjusted_df = edited_df.copy()
-adjusted_df['Total Rax'] = adjusted_df.apply(lambda row: round(row['Total Rax'] * RARITY_MULTIPLIERS[row['Rarity']]), 1),
+adjusted_df['Total Rax'] = adjusted_df.apply(
+    lambda row: round(row['Total Rax'] * RARITY_MULTIPLIERS[row['Rarity']]), 1
+)
 
 # Display final leaderboard
 st.markdown("### Adjusted RAX Leaderboard")
