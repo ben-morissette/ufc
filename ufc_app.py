@@ -3,7 +3,6 @@ import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 import string
-import time
 from difflib import get_close_matches
 from tqdm import tqdm
 
@@ -59,7 +58,7 @@ def get_fight_links(fighter_url):
         fight_links.append(fight_link)
         data.append({
             'fight_link': fight_link,
-            'result': cols[0].text.strip(),
+            'result': cols[0].text.strip().lower(),
             'opponent_name': cols[1].text.strip(),
             'method_main': cols[3].text.strip(),
             'fighter_name': soup.find('span', class_='b-content__title-highlight').text.strip()
@@ -107,8 +106,11 @@ def transform_columns(df):
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
     return df
 
+# --------------------------- Your Exact RAX Function ---------------------------
+
 def calculate_rax(row):
     rax = 0
+    # Rule 1: Rax based on method_main
     if row['result'] == 'win':
         if row['method_main'] == 'KO/TKO':
             rax += 100
@@ -123,25 +125,29 @@ def calculate_rax(row):
     elif row['result'] == 'loss':
         rax += 25
 
-    if 'TOT_fighter_Sig_Str_landed' in row.index and 'TOT_opponent_Sig_Str_landed' in row.index:
-        diff = row['TOT_fighter_Sig_Str_landed'] - row['TOT_opponent_Sig_Str_landed']
-        if diff > 0:
-            rax += diff
+    # Rule 2: Rax based on significant strike difference
+    sig_str_fighter = row.get('TOT_fighter_Sig_Str_landed', 0)
+    sig_str_opponent = row.get('TOT_opponent_Sig_Str_landed', 0)
 
+    if sig_str_fighter > sig_str_opponent:
+        rax += sig_str_fighter - sig_str_opponent
+
+    # Rule 3: Bonus for 5-round fights
     if 'TimeFormat' in row.index and '5 Rnd' in str(row['TimeFormat']):
         rax += 25
 
+    # Rule 4: Bonus for "Fight of the Night"
     if 'Details' in row.index and 'Fight of the Night' in str(row['Details']):
         rax += 50
 
     return rax
 
-# --------------------------- Data Caching ---------------------------
+# --------------------------- Build Leaderboard ---------------------------
 
-@st.cache_data(show_spinner="Building leaderboard (this may take a minute)...")
+@st.cache_data(show_spinner="Building leaderboard...")
 def build_leaderboard():
     all_data = []
-    for url in tqdm(all_fighter_links, desc="Processing fighters"):
+    for url in tqdm(all_fighter_links, desc="Calculating RAX"):
         try:
             fight_links, main_df = get_fight_links(url)
             if main_df.empty:
@@ -167,7 +173,7 @@ def build_leaderboard():
 
     df = pd.DataFrame(all_data)
     df = df.sort_values(by='total_rax', ascending=False).reset_index(drop=True)
-    df.insert(0, 'Rank', range(1, len(df) + 1))  # ✅ Add Rank column
+    df.insert(0, 'Rank', range(1, len(df) + 1))
     return df
 
 # --------------------------- Streamlit UI ---------------------------
