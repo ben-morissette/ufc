@@ -173,7 +173,7 @@ edited_df = st.data_editor(
 
 # Recalculate Total Rax based on selected rarity
 adjusted_df = edited_df.copy()
-adjusted_df['Total Rax'] = adjusted_df.apply(lambda row: round(row['Total Rax'] * RARITY_MULTIPLIERS[row['Rarity']]), 1)
+adjusted_df['Total Rax'] = adjusted_df.apply(lambda row: round(row['Total Rax'] * RARITY_MULTIPLIERS[row['Rarity']]), 1),
 
 # Display final leaderboard
 st.markdown("### Adjusted RAX Leaderboard")
