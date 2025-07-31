@@ -25,35 +25,46 @@ FIVE_ROUND_BONUS = 25
 def calculate_rax(row):
     rax = 0
 
-    result = str(row.get('result', '')).lower()
-    method = str(row.get('method_main', '')).strip()
+    result = str(row.get('result', '')).strip().lower()
+    method = str(row.get('method_main', '')).strip().lower()
 
-    # Points for win methods
+    # Normalize method keys for matching
+    scoring_lower = {k.lower(): v for k, v in SCORING.items()}
+
+    # Win points
     if result == 'win':
-        rax += SCORING.get(method, 0)
+        # Find matching method with partial matching because method may contain extra text
+        method_points = 0
+        for key in scoring_lower.keys():
+            if key in method:
+                method_points = scoring_lower[key]
+                break
+        rax += method_points
     elif result == 'loss':
-        rax += 25  # fixed points for loss
+        rax += 25
 
-    # Significant strikes difference bonus
-    fighter_sig = row.get('TOT_fighter_SigStr_landed', 0)
-    opponent_sig = row.get('TOT_opponent_SigStr_landed', 0)
-
+    # Significant strikes difference
     try:
-        diff = int(fighter_sig) - int(opponent_sig)
+        fighter_sig = int(row.get('TOT_fighter_SigStr_landed', 0))
+        opponent_sig = int(row.get('TOT_opponent_SigStr_landed', 0))
+        diff = fighter_sig - opponent_sig
         if diff > 0:
             rax += diff
-    except Exception:
-        pass  # ignore if parsing fails
+    except Exception as e:
+        print(f"SigStr parsing error: {e}")
 
-    # 5 round fight bonus
+    # 5 round bonus
     time_format = str(row.get('TimeFormat', ''))
-    if '5 Rnd' in time_format:
+    if '5 Rnd' in time_format or '5 rounds' in time_format.lower():
         rax += FIVE_ROUND_BONUS
 
-    # Fight of the night bonus
-    details = str(row.get('Details', ''))
-    if 'Fight of the Night' in details:
+    # Fight of the Night bonus
+    details = str(row.get('Details', '')).lower()
+    if 'fight of the night' in details:
         rax += 50
+
+    # Debug print per fight (you can remove this later)
+    print(f"Fight: {row.get('fighter_name', '')} vs {row.get('opponent_name', '')} | Result: {result} | Method: {method} | RAX: {rax}")
 
     return rax
 
