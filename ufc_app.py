@@ -3,9 +3,6 @@ import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 import string
-import time
-from tqdm import tqdm
-import numpy as np
 import os
 from datetime import datetime
 from difflib import get_close_matches
@@ -51,11 +48,9 @@ def get_fighter_url_by_name(name):
     res = requests.get(url)
     soup = BeautifulSoup(res.text, 'html.parser')
     table = soup.find('table', class_='b-statistics__table')
-    if not table:
-        raise ValueError("No fighter statistics table found")
+    rows = table.find('tbody').find_all('tr')
 
     fighter_urls = {}
-    rows = table.find('tbody').find_all('tr')
     for row in rows:
         fighter_name = row.find_all('td')[0].text.strip()
         fighter_link = row.find('a')['href']
@@ -72,8 +67,6 @@ def get_fight_links(fighter_url):
     res = requests.get(fighter_url)
     soup = BeautifulSoup(res.text, 'html.parser')
     table = soup.find('table', class_='b-fight-details__table')
-    if not table:
-        return [], pd.DataFrame()
 
     fight_links = []
     fighter_names = []
@@ -86,16 +79,14 @@ def get_fight_links(fighter_url):
         result = columns[0].text.strip().lower()
         opponent = columns[1].text.strip()
         method = columns[6].text.strip()
-        link_tag = columns[6].find('a')
-        link = link_tag['href'] if link_tag else ''
+        link = columns[6].find('a')['href']
 
         fight_links.append(link)
         results.append(result)
         opponent_names.append(opponent)
         methods.append(method)
 
-    fighter_name_tag = soup.find('span', class_='b-content__title-highlight')
-    fighter_name = fighter_name_tag.text.strip() if fighter_name_tag else ''
+    fighter_name = soup.find('span', class_='b-content__title-highlight').text.strip()
 
     df = pd.DataFrame({
         'fighter_name': fighter_name,
@@ -137,7 +128,7 @@ def parse_fight_details(fight_link, fighter_name, opponent_name):
                 try:
                     fighter_sig = int(fighter_cell.split('of')[0].strip())
                     opponent_sig = int(opponent_cell.split('of')[0].strip())
-                except Exception:
+                except:
                     continue
 
                 details['TOT_fighter_SigStr_landed'] = fighter_sig
@@ -164,7 +155,7 @@ def transform_columns(df):
 # -------------------------------
 def should_refresh():
     now = datetime.now()
-    is_tuesday = now.weekday() == 1  # Monday=0, Tuesday=1 ...
+    is_tuesday = now.weekday() == 1
     is_morning = now.hour < 12
 
     if not os.path.exists(LEADERBOARD_FILE):
@@ -179,27 +170,16 @@ def get_all_fighter_links():
     for char in string.ascii_lowercase:
         url = f"http://ufcstats.com/statistics/fighters?char={char}&page=all"
         res = requests.get(url)
-        if res.status_code != 200:
-            print(f"Warning: Failed to fetch page for char '{char}', status code {res.status_code}")
-            continue
-
         soup = BeautifulSoup(res.text, 'html.parser')
         table = soup.find('table', class_='b-statistics__table')
         if not table:
-            print(f"Warning: No statistics table found for char '{char}'")
             continue
-
         rows = table.find('tbody').find_all('tr')
         for row in rows:
             anchor = row.find('a')
             if anchor and anchor.has_attr('href'):
                 link = anchor['href']
                 all_links.append(link)
-            else:
-                print(f"Warning: No anchor with href found in row: {row}")
-
-        time.sleep(0.5)  # polite delay between requests
-
     return all_links
 
 # -------------------------------
@@ -210,16 +190,20 @@ def build_leaderboard():
 
     all_fighters_data = []
 
-    for fighter_url in tqdm(all_links, desc="Processing fighters"):
+    progress_bar = st.progress(0)
+    total = len(all_links)
+
+    for i, fighter_url in enumerate(all_links):
         try:
             fight_links, main_df = get_fight_links(fighter_url)
-            if main_df.empty:
-                continue
-
-            details = [parse_fight_details(f, main_df.loc[main_df['fight_link'] == f]['fighter_name'].values[0],
-                                           main_df.loc[main_df['fight_link'] == f]['opponent_name'].values[0])
-                       for f in fight_links]
-
+            details = [
+                parse_fight_details(
+                    f,
+                    main_df.loc[main_df['fight_link'] == f]['fighter_name'].values[0],
+                    main_df.loc[main_df['fight_link'] == f]['opponent_name'].values[0]
+                )
+                for f in fight_links
+            ]
             adv_df = pd.DataFrame(details)
             combined = pd.merge(main_df, adv_df, on='fight_link', how='left')
             combined = transform_columns(combined)
@@ -227,10 +211,21 @@ def build_leaderboard():
             total_rax = combined['rax_earned'].sum()
             all_fighters_data.append({'fighter_name': main_df['fighter_name'].iloc[0], 'total_rax': total_rax})
         except Exception as e:
-            print(f"Error processing fighter URL {fighter_url}: {e}")
+            st.warning(f"Error processing {fighter_url}: {e}")
             continue
 
+        progress_bar.progress((i + 1) / total)
+
+    if not all_fighters_data:
+        st.error("No fighter data collected. Please check the scraping logic or website availability.")
+        return pd.DataFrame(columns=['Rank', 'fighter_name', 'total_rax'])
+
     leaderboard = pd.DataFrame(all_fighters_data)
+
+    if 'total_rax' not in leaderboard.columns:
+        st.error("Leaderboard DataFrame missing 'total_rax' column!")
+        return pd.DataFrame(columns=['Rank', 'fighter_name', 'total_rax'])
+
     leaderboard = leaderboard.sort_values(by='total_rax', ascending=False).reset_index(drop=True)
     leaderboard.insert(0, "Rank", leaderboard.index + 1)
     return leaderboard
