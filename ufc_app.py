@@ -88,7 +88,7 @@ def cache_and_load():
         df.to_csv(CACHE_FILE, index=False)
         return df
 
-def render_rows(df):
+def render_editable_rows(df):
     st.markdown("""
     <style>
       .row-box {
@@ -100,15 +100,9 @@ def render_rows(df):
         align-items: center;
         background-color: #f9f9f9;
       }
-      .col-name {
-        flex: 4;
-        font-weight: 600;
-        font-size: 18px;
-      }
-      .col-rarity, .col-rax {
-        flex: 2;
-        text-align: center;
-      }
+      .col-rank { flex: 0.5; font-weight: 700; }
+      .col-name { flex: 3.5; font-weight: 600; font-size: 18px; }
+      .col-rarity, .col-rax { flex: 1.5; text-align: center; }
       select {
         font-size: 16px;
         padding: 4px 6px;
@@ -117,48 +111,53 @@ def render_rows(df):
     </style>
     """, unsafe_allow_html=True)
     
-    selections = []
+    rarities = []
     for idx, r in df.iterrows():
-        cols = st.columns([4, 2, 2])
+        cols = st.columns([0.5, 3.5, 1.5, 1.5])
         with cols[0]:
-            st.markdown(f"<div class='row-box'><div class='col-name'>{r['Fighter Name']}</div></div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='row-box'>{r['Rank']}</div>", unsafe_allow_html=True)
         with cols[1]:
-            rarity = st.selectbox("", list(RARITY_MULTIPLIERS.keys()), index=list(RARITY_MULTIPLIERS.keys()).index(r['Rarity']), key=f"rarity_{idx}", label_visibility="collapsed")
+            st.markdown(f"<div class='row-box'>{r['Fighter Name']}</div>", unsafe_allow_html=True)
         with cols[2]:
+            rarity = st.selectbox("", list(RARITY_MULTIPLIERS.keys()),
+                                  index=list(RARITY_MULTIPLIERS.keys()).index(r['Rarity']),
+                                  key=f"rarity_{idx}", label_visibility="collapsed")
+        with cols[3]:
             total_rax = round(r['Base Rax'] * RARITY_MULTIPLIERS[rarity], 1)
-            st.markdown(f"<div class='row-box'><div class='col-rax'>{total_rax}</div></div>", unsafe_allow_html=True)
-        selections.append(rarity)
-    return selections
+            st.markdown(f"<div class='row-box'>{total_rax}</div>", unsafe_allow_html=True)
+        rarities.append(rarity)
+    return rarities
 
 def main():
     st.set_page_config(layout="wide", page_title="UFC RAX Leaderboard")
     st.title("🏆 UFC Fighter RAX Leaderboard")
 
     df = cache_and_load()
-    rarities = render_rows(df)
-    df['Rarity'] = rarities
+    
+    # If this is first load, initialize session state rarity list
+    if "rarities" not in st.session_state:
+        st.session_state.rarities = list(df['Rarity'])
+
+    # Apply current rarities from session_state (updated with user selections)
+    df['Rarity'] = st.session_state.rarities
     df['Total Rax'] = df.apply(lambda r: round(r['Base Rax'] * RARITY_MULTIPLIERS[r['Rarity']], 1), axis=1)
     df = df.sort_values(by='Total Rax', ascending=False).reset_index(drop=True)
     if 'Rank' in df.columns:
         df.drop(columns=['Rank'], inplace=True)
     df.insert(0, 'Rank', df.index + 1)
 
+    # Display the final leaderboard on top
+    st.markdown("### Final Leaderboard (Sorted by Adjusted RAX)")
+    st.dataframe(df[['Rank','Fighter Name','Total Rax','Rarity']], use_container_width=True)
+
     st.markdown("---")
-    st.markdown("### Final Leaderboard (Sorted)")
-    for idx, row in df.iterrows():
-        st.markdown(f"""
-            <div style='
-                border: 1px solid #555;
-                border-radius: 8px;
-                padding: 10px;
-                margin-bottom: 6px;
-                background-color: #e6e6e6;
-                font-weight: 600;
-                font-size: 17px;
-            '>
-                #{row['Rank']} {row['Fighter Name']} - RAX: {row['Total Rax']} (Rarity: {row['Rarity']})
-            </div>
-        """, unsafe_allow_html=True)
+    st.markdown("### Edit Rarity per Fighter Below")
+    
+    # Editable rows with dropdowns below, update session_state on changes
+    new_rarities = render_editable_rows(df)
+    if new_rarities != st.session_state.rarities:
+        st.session_state.rarities = new_rarities
+        st.experimental_rerun()
 
 if __name__ == "__main__":
     main()
