@@ -1,7 +1,7 @@
 import streamlit as st
+import pandas as pd
 import requests
 from bs4 import BeautifulSoup
-import pandas as pd
 from datetime import datetime, timedelta
 import os
 import time
@@ -77,11 +77,11 @@ def cache_and_load():
         df = pd.read_csv(CACHE_FILE)
         if 'Rank' in df.columns:
             df.drop(columns=['Rank'], inplace=True)
-        df.insert(0, 'Rank', df.index + 1)
-        if 'Base Rax' not in df.columns and 'Total Rax' in df.columns:
+        if 'Total Rax' in df.columns and 'Base Rax' not in df.columns:
             df.rename(columns={'Total Rax': 'Base Rax'}, inplace=True)
         if 'Rarity' not in df.columns:
             df['Rarity'] = 'Uncommon'
+        df.insert(0, 'Rank', df.index + 1)
         return df
     else:
         df = generate_leaderboard()
@@ -91,38 +91,74 @@ def cache_and_load():
 def render_rows(df):
     st.markdown("""
     <style>
-      .row-box {border:1px solid #ccc; padding:8px; margin-bottom:4px;}
+      .row-box {
+        border: 1px solid #999;
+        border-radius: 8px;
+        padding: 12px;
+        margin-bottom: 10px;
+        display: flex;
+        align-items: center;
+        background-color: #f9f9f9;
+      }
+      .col-name {
+        flex: 4;
+        font-weight: 600;
+        font-size: 18px;
+      }
+      .col-rarity, .col-rax {
+        flex: 2;
+        text-align: center;
+      }
+      select {
+        font-size: 16px;
+        padding: 4px 6px;
+        border-radius: 4px;
+      }
     </style>
     """, unsafe_allow_html=True)
+    
     selections = []
     for idx, r in df.iterrows():
-        col1, col2, col3 = st.columns([4, 2, 2])
-        with col1:
-            st.markdown(f"<div class='row-box'><strong>{r['Fighter Name']}</strong></div>", unsafe_allow_html=True)
-        with col2:
-            sel = st.selectbox("", list(RARITY_MULTIPLIERS.keys()), index=list(RARITY_MULTIPLIERS.keys()).index(r['Rarity']),
-                               key=f"rarity_{idx}", label_visibility="collapsed")
-        with col3:
-            trax = round(r['Base Rax'] * RARITY_MULTIPLIERS[sel], 1)
-            st.markdown(f"<div class='row-box'>{trax}</div>", unsafe_allow_html=True)
-        selections.append(sel)
+        cols = st.columns([4, 2, 2])
+        with cols[0]:
+            st.markdown(f"<div class='row-box'><div class='col-name'>{r['Fighter Name']}</div></div>", unsafe_allow_html=True)
+        with cols[1]:
+            rarity = st.selectbox("", list(RARITY_MULTIPLIERS.keys()), index=list(RARITY_MULTIPLIERS.keys()).index(r['Rarity']), key=f"rarity_{idx}", label_visibility="collapsed")
+        with cols[2]:
+            total_rax = round(r['Base Rax'] * RARITY_MULTIPLIERS[rarity], 1)
+            st.markdown(f"<div class='row-box'><div class='col-rax'>{total_rax}</div></div>", unsafe_allow_html=True)
+        selections.append(rarity)
     return selections
 
 def main():
     st.set_page_config(layout="wide", page_title="UFC RAX Leaderboard")
     st.title("🏆 UFC Fighter RAX Leaderboard")
+
     df = cache_and_load()
-    selections = render_rows(df)
-    df['Rarity'] = selections
+    rarities = render_rows(df)
+    df['Rarity'] = rarities
     df['Total Rax'] = df.apply(lambda r: round(r['Base Rax'] * RARITY_MULTIPLIERS[r['Rarity']], 1), axis=1)
     df = df.sort_values(by='Total Rax', ascending=False).reset_index(drop=True)
     if 'Rank' in df.columns:
         df.drop(columns=['Rank'], inplace=True)
     df.insert(0, 'Rank', df.index + 1)
-    st.markdown("---")
-    st.markdown("### Final Leaderboard")
-    st.dataframe(df[['Rank','Fighter Name','Total Rax','Rarity']], use_container_width=True)
 
+    st.markdown("---")
+    st.markdown("### Final Leaderboard (Sorted)")
+    for idx, row in df.iterrows():
+        st.markdown(f"""
+            <div style='
+                border: 1px solid #555;
+                border-radius: 8px;
+                padding: 10px;
+                margin-bottom: 6px;
+                background-color: #e6e6e6;
+                font-weight: 600;
+                font-size: 17px;
+            '>
+                #{row['Rank']} {row['Fighter Name']} - RAX: {row['Total Rax']} (Rarity: {row['Rarity']})
+            </div>
+        """, unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
