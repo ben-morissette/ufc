@@ -3,6 +3,7 @@ import requests
 from bs4 import BeautifulSoup
 import pandas as pd
 import concurrent.futures
+import string
 
 RARITY_MULTIPLIERS = {
     "Uncommon": 1.4,
@@ -14,29 +15,29 @@ RARITY_MULTIPLIERS = {
 }
 
 def find_fighter_url(name):
-    base_url = "http://ufcstats.com/statistics/fighters?char={letter}&page={page}"
     name = name.strip().lower()
-    first_letter = name[0]
-    page = 1
-    while True:
-        url = base_url.format(letter=first_letter, page=page)
-        res = requests.get(url)
-        if res.status_code != 200:
-            return None
-        soup = BeautifulSoup(res.text, "html.parser")
-        table = soup.find("table", class_="b-statistics__table")
-        if not table:
-            return None
-        rows = table.find("tbody").find_all("tr", class_="b-statistics__table-row")
-        if not rows:
-            return None
-        for row in rows:
-            link = row.find_all("td")[0].find("a", class_="b-link_style_black")
-            if link:
-                fighter_name = link.text.strip().lower()
-                if fighter_name == name:
-                    return link["href"]
-        page += 1
+    for letter in string.ascii_lowercase:
+        page = 1
+        while True:
+            url = f"http://ufcstats.com/statistics/fighters?char={letter}&page={page}"
+            res = requests.get(url)
+            if res.status_code != 200:
+                break
+            soup = BeautifulSoup(res.text, "html.parser")
+            table = soup.find("table", class_="b-statistics__table")
+            if not table:
+                break
+            rows = table.find("tbody").find_all("tr", class_="b-statistics__table-row")
+            if not rows:
+                break
+            for row in rows:
+                link = row.find_all("td")[0].find("a", class_="b-link_style_black")
+                if link:
+                    fighter_name = link.text.strip().lower()
+                    if fighter_name == name:
+                        return link["href"]
+            page += 1
+    return None
 
 def get_fight_links_and_main_data(fighter_url):
     res = requests.get(fighter_url)
