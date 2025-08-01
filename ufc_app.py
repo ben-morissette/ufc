@@ -2,8 +2,8 @@ import streamlit as st
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
+import concurrent.futures
 
-# Rarity multipliers
 RARITY_MULTIPLIERS = {
     "Uncommon": 1.4,
     "Rare": 1.6,
@@ -14,7 +14,6 @@ RARITY_MULTIPLIERS = {
 }
 
 def find_fighter_url(name):
-    """Find fighter profile URL by exact name (case-insensitive). Searches pages by first letter until found or no more pages."""
     base_url = "http://ufcstats.com/statistics/fighters?char={letter}&page={page}"
     name = name.strip().lower()
     first_letter = name[0]
@@ -31,7 +30,6 @@ def find_fighter_url(name):
         rows = table.find("tbody").find_all("tr", class_="b-statistics__table-row")
         if not rows:
             return None
-        found = False
         for row in rows:
             link = row.find_all("td")[0].find("a", class_="b-link_style_black")
             if link:
@@ -41,7 +39,6 @@ def find_fighter_url(name):
         page += 1
 
 def get_fight_links_and_main_data(fighter_url):
-    """Scrape the main fighter page for fight URLs and basic fight info."""
     res = requests.get(fighter_url)
     soup = BeautifulSoup(res.text, "html.parser")
     table = soup.find("table", class_="b-fight-details__table_type_event-details")
@@ -60,9 +57,8 @@ def get_fight_links_and_main_data(fighter_url):
         method_detail = cols[7].find_all("p")[1].get_text(strip=True) if len(cols[7].find_all("p")) > 1 else ""
         round_val = cols[8].find("p").get_text(strip=True)
         time_val = cols[9].find("p").get_text(strip=True) if len(cols) > 9 else ""
-        fight_link = fighter_url  # We'll reuse fighter_url since detailed info pages are same
+        fight_link = fighter_url  # same page for details (will parse again)
 
-        # Normalize method names
         method_map = {
             'KO/TKO': 'KO/TKO',
             'Submission': 'Submission',
@@ -88,17 +84,12 @@ def get_fight_links_and_main_data(fighter_url):
     return [f['fight_link'] for f in fights], pd.DataFrame(fights)
 
 def parse_fight_details(fight_link, fighter_name, opponent_name):
-    """Scrape detailed fight info from the fight page for specific fighter/opponent."""
     res = requests.get(fight_link)
     soup = BeautifulSoup(res.text, "html.parser")
 
-    # Find stats table rows to get significant strikes, etc.
     stats_tables = soup.find_all("table", class_="b-fight-details__table")
-    # We expect two main tables, one per fighter
-    # We'll locate the one for the fighter and opponent by matching names
 
-    def parse_stats_table(table, expected_fighter):
-        # Parse relevant stats from the given table
+    def parse_stats_table(table):
         stats = {}
         rows = table.find_all("tr")
         for row in rows:
@@ -108,8 +99,6 @@ def parse_fight_details(fight_link, fighter_name, opponent_name):
             stat_name = cols[0].get_text(strip=True)
             fighter_stat = cols[1].get_text(strip=True)
             opponent_stat = cols[2].get_text(strip=True)
-
-            # We'll extract significant strikes landed here for RAX
             if stat_name == "SIG. STRIKES":
                 try:
                     stats['TOT_fighter_SigStr_landed'] = int(fighter_stat)
@@ -117,11 +106,8 @@ def parse_fight_details(fight_link, fighter_name, opponent_name):
                 except:
                     stats['TOT_fighter_SigStr_landed'] = 0
                     stats['TOT_opponent_SigStr_landed'] = 0
-            # You can parse more stats here as needed
-
         return stats
 
-    # Find which table is fighter's by matching names near stats
     fighter_stats = {}
     for table in stats_tables:
         header = table.find_previous_sibling("div")
@@ -129,10 +115,9 @@ def parse_fight_details(fight_link, fighter_name, opponent_name):
             continue
         header_name = header.get_text(strip=True).lower()
         if fighter_name.lower() in header_name:
-            fighter_stats = parse_stats_table(table, fighter_name)
+            fighter_stats = parse_stats_table(table)
             break
 
-    # Extract 'TimeFormat' and 'Details' info from fight details area if possible
     time_format = ""
     details = ""
 
@@ -151,9 +136,6 @@ def parse_fight_details(fight_link, fighter_name, opponent_name):
     return fighter_stats
 
 def transform_columns(df):
-    """Any necessary data cleanup or type conversions."""
-    # For example, convert numeric fields from strings if needed
-    # Currently, assume numeric fields parsed correctly
     return df
 
 def calculate_rax(row):
@@ -186,8 +168,28 @@ def calculate_rax(row):
 
     return rax
 
-# Streamlit UI
+def fetch_fight_details_parallel(fight_links, main_fights_df):
+    all_details = []
+    progress_bar = st.progress(0)
+    total = len(fight_links)
 
+    def fetch_one(fl):
+        row = main_fights_df.loc[main_fights_df['fight_link'] == fl].iloc[0]
+        return parse_fight_details(fl, row['fighter_name'], row['opponent_name'])
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        futures = [executor.submit(fetch_one, fl) for fl in fight_links]
+        for i, future in enumerate(concurrent.futures.as_completed(futures)):
+            try:
+                all_details.append(future.result())
+            except Exception:
+                all_details.append({})
+            progress_bar.progress((i + 1) / total)
+
+    progress_bar.empty()
+    return all_details
+
+# Streamlit UI
 st.title("UFC Fighter RAX Search")
 
 fighter_name_input = st.text_input("Enter fighter full name exactly (case insensitive)")
@@ -201,11 +203,7 @@ if fighter_name_input.strip():
         with st.spinner(f"Loading fights and details for {fighter_name_input}..."):
             fight_links, main_fights_df = get_fight_links_and_main_data(url)
 
-            all_details = []
-            for fl in fight_links:
-                row = main_fights_df.loc[main_fights_df['fight_link'] == fl].iloc[0]
-                details = parse_fight_details(fl, row['fighter_name'], row['opponent_name'])
-                all_details.append(details)
+            all_details = fetch_fight_details_parallel(fight_links, main_fights_df)
 
             details_df = pd.DataFrame(all_details)
             combined_df = pd.merge(main_fights_df, details_df, on='fight_link', how='left')
@@ -219,7 +217,6 @@ if fighter_name_input.strip():
 
             st.markdown(f"### {fighter_name_input.strip()} - Total RAX: {total_rax} (Adjusted: {adjusted_rax} × {rarity})")
 
-            # Add total row
             total_row = pd.DataFrame({
                 'fighter_name': [''],
                 'opponent_name': [''],
