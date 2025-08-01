@@ -148,7 +148,17 @@ def generate_leaderboard():
     return df
 
 def recalc_total_rax(df):
-    df["Total Rax"] = df.apply(lambda r: round(r["Base Rax"] * RARITY_MULTIPLIERS.get(r["Rarity"], 1.4), 1), axis=1)
+    if 'Rarity' not in df.columns:
+        df['Rarity'] = 'Uncommon'
+    else:
+        df['Rarity'] = df['Rarity'].fillna('Uncommon')
+    if 'Base Rax' not in df.columns:
+        raise ValueError("DataFrame missing 'Base Rax' column")
+
+    df["Total Rax"] = df.apply(
+        lambda r: round(r["Base Rax"] * RARITY_MULTIPLIERS.get(r["Rarity"], 1.4), 1),
+        axis=1,
+    )
     df.sort_values("Total Rax", ascending=False, inplace=True)
     df.reset_index(drop=True, inplace=True)
     df["Rank"] = df.index + 1
@@ -158,11 +168,13 @@ st.title("UFC Fighter RAX Leaderboard")
 
 if cache_is_fresh():
     leaderboard_df = pd.read_csv(CACHE_FILE)
-    # Clean and fix rank and rarity
     if 'Rank' in leaderboard_df.columns:
         leaderboard_df.drop(columns=['Rank'], inplace=True)
+    if 'Rarity' not in leaderboard_df.columns:
+        leaderboard_df['Rarity'] = 'Uncommon'
+    else:
+        leaderboard_df['Rarity'] = leaderboard_df['Rarity'].fillna('Uncommon')
     leaderboard_df.insert(0, 'Rank', leaderboard_df.index + 1)
-    leaderboard_df['Rarity'] = leaderboard_df.get('Rarity', 'Uncommon')
 else:
     leaderboard_df = generate_leaderboard()
     leaderboard_df.to_csv(CACHE_FILE, index=False)
