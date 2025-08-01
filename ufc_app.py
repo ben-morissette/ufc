@@ -134,11 +134,9 @@ def main():
 
     df = cache_and_load()
     
-    # If this is first load, initialize session state rarity list
     if "rarities" not in st.session_state:
         st.session_state.rarities = list(df['Rarity'])
 
-    # Apply current rarities from session_state (updated with user selections)
     df['Rarity'] = st.session_state.rarities
     df['Total Rax'] = df.apply(lambda r: round(r['Base Rax'] * RARITY_MULTIPLIERS[r['Rarity']], 1), axis=1)
     df = df.sort_values(by='Total Rax', ascending=False).reset_index(drop=True)
@@ -146,15 +144,14 @@ def main():
         df.drop(columns=['Rank'], inplace=True)
     df.insert(0, 'Rank', df.index + 1)
 
-    # Display the final leaderboard on top
     st.markdown("### Final Leaderboard (Sorted by Adjusted RAX)")
     st.dataframe(df[['Rank','Fighter Name','Total Rax','Rarity']], use_container_width=True)
 
     st.markdown("---")
     st.markdown("### Edit Rarity per Fighter Below")
-    
-    # Editable rows with dropdowns below, update session_state on changes
+
     new_rarities = render_editable_rows(df)
+
     if new_rarities != st.session_state.rarities:
         st.session_state.rarities = new_rarities
         st.experimental_rerun()
