@@ -170,6 +170,8 @@ if cache_is_fresh():
     leaderboard_df = pd.read_csv(CACHE_FILE)
     if 'Rank' in leaderboard_df.columns:
         leaderboard_df.drop(columns=['Rank'], inplace=True)
+    if 'Total Rax' in leaderboard_df.columns and 'Base Rax' not in leaderboard_df.columns:
+        leaderboard_df.rename(columns={'Total Rax': 'Base Rax'}, inplace=True)
     if 'Rarity' not in leaderboard_df.columns:
         leaderboard_df['Rarity'] = 'Uncommon'
     else:
