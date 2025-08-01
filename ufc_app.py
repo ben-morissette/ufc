@@ -3,6 +3,12 @@ import requests
 from bs4 import BeautifulSoup
 import pandas as pd
 
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                  "AppleWebKit/537.36 (KHTML, like Gecko) "
+                  "Chrome/115.0 Safari/537.36"
+}
+
 RARITY_MULTIPLIERS = {
     "Uncommon": 1.4,
     "Rare": 1.6,
@@ -15,19 +21,20 @@ RARITY_MULTIPLIERS = {
 def get_all_fighters():
     fighters = {}
     base_url = "http://ufcstats.com/statistics/fighters?char={letter}&page={page}"
-    for letter in list("abcdefghijklmnopqrstuvwxyz"):
+    for letter in "abcdefghijklmnopqrstuvwxyz":
         page = 1
         while True:
             url = base_url.format(letter=letter, page=page)
-            response = requests.get(url)
+            response = requests.get(url, headers=HEADERS)
+            if response.status_code != 200:
+                break
             soup = BeautifulSoup(response.text, 'html.parser')
             table = soup.find('table', class_='b-statistics__table')
             if not table:
-                break  # no more pages for this letter
+                break
             rows = table.find('tbody').find_all('tr', class_='b-statistics__table-row')
             if not rows:
-                break  # no fighters on this page
-
+                break
             for row in rows:
                 link = row.find_all('td')[0].find('a', class_='b-link_style_black')
                 if link and link.has_attr('href'):
@@ -45,7 +52,7 @@ def get_two_values_from_col(col):
         return None, None
 
 def get_fight_data(fighter_url):
-    response = requests.get(fighter_url)
+    response = requests.get(fighter_url, headers=HEADERS)
     soup = BeautifulSoup(response.text, 'html.parser')
     table = soup.find('table', class_='b-fight-details__table_type_event-details')
     if not table:
@@ -85,8 +92,6 @@ def get_fight_data(fighter_url):
         round_val = cols[8].find('p').get_text(strip=True)
         time_val = cols[9].find('p').get_text(strip=True) if len(cols) > 9 else ''
 
-        fight_url = ''  # Placeholder if needed
-
         fight_data = {
             'result': result,
             'fighter_name': fighter_name,
@@ -105,7 +110,7 @@ def get_fight_data(fighter_url):
             'method_detail': method_detail,
             'round': round_val,
             'Time': time_val,
-            'fight_link': fight_url
+            'fight_link': fighter_url,
         }
         fights.append(fight_data)
 
@@ -149,10 +154,16 @@ st.title("UFC Fighter RAX Search")
 
 @st.cache_data(show_spinner=False)
 def load_all_fighters():
-    return get_all_fighters()
+    fighters = get_all_fighters()
+    return fighters
 
-with st.spinner("Loading fighter list (this may take a moment)..."):
-    fighter_dict = load_all_fighters()
+fighter_dict = load_all_fighters()
+
+st.write(f"Loaded {len(fighter_dict)} fighters.")
+if 'jon jones' in fighter_dict:
+    st.write("Jon Jones is found!")
+else:
+    st.write("Jon Jones is NOT found!")
 
 search_input = st.text_input("Enter fighter full name exactly (case insensitive)")
 
