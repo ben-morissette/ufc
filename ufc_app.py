@@ -13,16 +13,34 @@ RARITY_MULTIPLIERS = {
 }
 
 def get_fighter_url_by_name(name):
-    # Search UFC stats fighter list to find the URL for the fighter name
-    url = "http://ufcstats.com/statistics/fighters"
-    response = requests.get(url)
-    soup = BeautifulSoup(response.text, "html.parser")
-    table = soup.find("table", class_="b-statistics__table")
-    rows = table.find("tbody").find_all("tr")
-    for row in rows:
-        link = row.find_all("td")[0].find("a", class_="b-link_style_black")
-        if link and link.text.strip().lower() == name.lower():
-            return link["href"]
+    base_url = "http://ufcstats.com/statistics/fighters"
+    page = 1
+    name_lower = name.lower()
+
+    while True:
+        url = f"{base_url}/?page={page}"
+        response = requests.get(url)
+        soup = BeautifulSoup(response.text, "html.parser")
+        table = soup.find("table", class_="b-statistics__table")
+        if not table:
+            break  # no table means no fighters here
+
+        rows = table.find("tbody").find_all("tr")
+        if not rows:
+            break  # no rows means no fighters here
+
+        found_url = None
+        for row in rows:
+            link = row.find_all("td")[0].find("a", class_="b-link_style_black")
+            if link and link.text.strip().lower() == name_lower:
+                found_url = link["href"]
+                break
+
+        if found_url:
+            return found_url
+
+        page += 1  # next page
+
     return None
 
 def get_two_values_from_col(col):
