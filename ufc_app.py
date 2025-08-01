@@ -3,7 +3,9 @@ import requests
 from bs4 import BeautifulSoup
 import pandas as pd
 import string
+from difflib import get_close_matches
 
+@st.cache_data(show_spinner=False)
 def fetch_all_fighters():
     base_url = "http://ufcstats.com/statistics/fighters"
     fighters = []
@@ -24,16 +26,20 @@ def fetch_all_fighters():
                 fighters.append({"name": name, "url": href})
     return fighters
 
-@st.cache_data(show_spinner=False)
-def get_fighters_cached():
-    return fetch_all_fighters()
-
-def get_fighter_url(name, fighters):
+def find_fighter_url(name, fighters):
     name_lower = name.lower()
+    # Try exact match
     for f in fighters:
         if f["name"].lower() == name_lower:
-            return f["url"]
-    return None
+            return f["url"], f["name"]
+    # Try partial match (contained in)
+    for f in fighters:
+        if name_lower in f["name"].lower():
+            return f["url"], f["name"]
+    # Use fuzzy matching (top 3 close names)
+    all_names = [f["name"] for f in fighters]
+    close = get_close_matches(name, all_names, n=3, cutoff=0.6)
+    return None, close
 
 def get_fight_data(fighter_url):
     resp = requests.get(fighter_url)
@@ -93,21 +99,27 @@ def calculate_rax(row):
 
 st.title("UFC Fighter RAX Search")
 
-# Cache all fighters once
-fighters = get_fighters_cached()
+# Fetch all fighters once, cache for session
+fighters = fetch_all_fighters()
 
 fighter_name_input = st.text_input("Enter full fighter name (e.g., Conor McGregor)")
 
 if fighter_name_input:
-    fighter_url = get_fighter_url(fighter_name_input.strip(), fighters)
+    fighter_url, match_info = find_fighter_url(fighter_name_input.strip(), fighters)
     if fighter_url:
+        st.success(f"Found fighter: **{match_info}**")
         fights_df = get_fight_data(fighter_url)
         if fights_df.empty:
             st.warning("No fight data found for this fighter.")
         else:
             fights_df["Rax Earned"] = fights_df.apply(calculate_rax, axis=1)
             total_rax = fights_df["Rax Earned"].sum()
-            st.write(f"Total RAX for **{fighter_name_input}**: {total_rax}")
+            st.write(f"Total RAX for **{match_info}**: {total_rax}")
             st.dataframe(fights_df)
     else:
-        st.error("Fighter not found. Please check the name and try again.")
+        st.error("Fighter not found. Did you mean:")
+        if match_info:
+            for possible in match_info:
+                st.write(f"- {possible}")
+        else:
+            st.write("No close matches found.")
