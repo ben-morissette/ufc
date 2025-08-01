@@ -13,22 +13,28 @@ RARITY_MULTIPLIERS = {
 }
 
 def get_all_fighters():
-    base_url = "http://ufcstats.com/statistics/fighters?char="
     fighters = {}
+    base_url = "http://ufcstats.com/statistics/fighters?char={letter}&page={page}"
     for letter in list("abcdefghijklmnopqrstuvwxyz"):
-        url = base_url + letter
-        response = requests.get(url)
-        soup = BeautifulSoup(response.text, 'html.parser')
-        table = soup.find('table', class_='b-statistics__table')
-        if not table:
-            continue
-        rows = table.find('tbody').find_all('tr', class_='b-statistics__table-row')
-        for row in rows:
-            link = row.find_all('td')[0].find('a', class_='b-link_style_black')
-            if link and link.has_attr('href'):
-                name = link.text.strip()
-                href = link['href']
-                fighters[name.lower()] = (name, href)  # store lowercase key and original name + url
+        page = 1
+        while True:
+            url = base_url.format(letter=letter, page=page)
+            response = requests.get(url)
+            soup = BeautifulSoup(response.text, 'html.parser')
+            table = soup.find('table', class_='b-statistics__table')
+            if not table:
+                break  # no more pages for this letter
+            rows = table.find('tbody').find_all('tr', class_='b-statistics__table-row')
+            if not rows:
+                break  # no fighters on this page
+
+            for row in rows:
+                link = row.find_all('td')[0].find('a', class_='b-link_style_black')
+                if link and link.has_attr('href'):
+                    name = link.text.strip()
+                    href = link['href']
+                    fighters[name.lower()] = (name, href)
+            page += 1
     return fighters
 
 def get_two_values_from_col(col):
