@@ -2,8 +2,6 @@ import streamlit as st
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
-from datetime import datetime
-import os
 import difflib
 
 RARITY_MULTIPLIERS = {
@@ -15,7 +13,6 @@ RARITY_MULTIPLIERS = {
     "Iconic": 6,
 }
 
-# Get all fighters from all alphabet pages (A-Z)
 def get_all_fighters():
     base_url = "http://ufcstats.com/statistics/fighters?char="
     fighters = {}
@@ -37,7 +34,10 @@ def get_all_fighters():
 
 def get_two_values_from_col(col):
     ps = col.find_all('p', class_='b-fight-details__table-text')
-    return (ps[0].get_text(strip=True), ps[1].get_text(strip=True)) if len(ps) == 2 else (None, None)
+    if len(ps) == 2:
+        return ps[0].get_text(strip=True), ps[1].get_text(strip=True)
+    else:
+        return None, None
 
 def get_fight_data(fighter_url):
     response = requests.get(fighter_url)
@@ -48,76 +48,103 @@ def get_fight_data(fighter_url):
 
     rows = table.find('tbody').find_all('tr', class_='b-fight-details__table-row__hover')
     fights = []
+
+    method_map = {
+        'KO/TKO': 'KO/TKO',
+        'Submission': 'Submission',
+        'U-DEC': 'Decision - Unanimous',
+        'M-DEC': 'Decision - Majority',
+        'S-DEC': 'Decision - Split',
+    }
+
     for row in rows:
         cols = row.find_all('td', class_='b-fight-details__table-col')
+
         result = cols[0].find('p').get_text(strip=True).lower()
         fighter_name = cols[1].find_all('p')[0].get_text(strip=True)
         opponent_name = cols[1].find_all('p')[1].get_text(strip=True)
-        kd_f, kd_o = get_two_values_from_col(cols[2])
-        str_f, str_o = get_two_values_from_col(cols[3])
-        td_f, td_o = get_two_values_from_col(cols[4])
-        sub_f, sub_o = get_two_values_from_col(cols[5])
+
+        kd_fighter, kd_opponent = get_two_values_from_col(cols[2])
+        str_fighter, str_opponent = get_two_values_from_col(cols[3])
+        td_fighter, td_opponent = get_two_values_from_col(cols[4])
+        sub_fighter, sub_opponent = get_two_values_from_col(cols[5])
+
         event_name = cols[6].find_all('p')[0].get_text(strip=True)
-        method = cols[7].find_all('p')[0].get_text(strip=True)
+        event_date = cols[6].find_all('p')[1].get_text(strip=True) if len(cols[6].find_all('p')) > 1 else None
+
+        method_main_raw = cols[7].find_all('p')[0].get_text(strip=True)
+        method_detail = cols[7].find_all('p')[1].get_text(strip=True) if len(cols[7].find_all('p')) > 1 else ''
+
+        method_main = method_map.get(method_main_raw, method_main_raw)
+
         round_val = cols[8].find('p').get_text(strip=True)
+        time_val = cols[9].find('p').get_text(strip=True) if len(cols) > 9 else ''
 
-        fights.append({
-            'Result': result,
-            'Fighter Name': fighter_name,
-            'Opponent Name': opponent_name,
-            'KD Fighter': kd_f,
-            'KD Opponent': kd_o,
-            'Strikes Fighter': str_f,
-            'Strikes Opponent': str_o,
-            'Takedowns Fighter': td_f,
-            'Takedowns Opponent': td_o,
-            'Submission Attempts Fighter': sub_f,
-            'Submission Attempts Opponent': sub_o,
-            'Event Name': event_name,
-            'Method Main': method,
-            'Round': round_val,
-        })
+        fight_url = ''  # Placeholder for fight-specific URL if you want to add it later
+
+        fight_data = {
+            'result': result,
+            'fighter_name': fighter_name,
+            'opponent_name': opponent_name,
+            'kd_fighter': kd_fighter,
+            'kd_opponent': kd_opponent,
+            'str_fighter': str_fighter,
+            'str_opponent': str_opponent,
+            'td_fighter': td_fighter,
+            'td_opponent': td_opponent,
+            'sub_fighter': sub_fighter,
+            'sub_opponent': sub_opponent,
+            'event_name': event_name,
+            'event_date': event_date,
+            'method_main': method_main,
+            'method_detail': method_detail,
+            'round': round_val,
+            'Time': time_val,
+            'fight_link': fight_url
+        }
+        fights.append(fight_data)
+
     return pd.DataFrame(fights)
-
-def safe_int(val):
-    try:
-        return int(val)
-    except:
-        return 0
 
 def calculate_rax(row):
     rax = 0
-    if row['Result'] == 'win':
-        method = row['Method Main'].lower()
-        if 'ko' in method or 'tko' in method:
+    # Rule 1: Rax based on method_main
+    if row['result'] == 'win':
+        if row['method_main'] == 'KO/TKO':
             rax += 100
-        elif 'submission' in method:
+        elif row['method_main'] == 'Submission':
             rax += 90
-        elif 'unanimous' in method:
+        elif row['method_main'] == 'Decision - Unanimous':
             rax += 80
-        elif 'majority' in method:
+        elif row['method_main'] == 'Decision - Majority':
             rax += 75
-        elif 'split' in method:
+        elif row['method_main'] == 'Decision - Split':
             rax += 70
-    elif row['Result'] == 'loss':
+    elif row['result'] == 'loss':
         rax += 25
 
-    strike_diff = safe_int(row['Strikes Fighter']) - safe_int(row['Strikes Opponent'])
-    if strike_diff > 0:
-        rax += strike_diff
+    # Rule 2: Rax based on significant strike difference
+    sig_str_fighter = 0
+    sig_str_opponent = 0
+    try:
+        sig_str_fighter = int(row['str_fighter']) if row['str_fighter'] is not None else 0
+        sig_str_opponent = int(row['str_opponent']) if row['str_opponent'] is not None else 0
+    except:
+        sig_str_fighter = 0
+        sig_str_opponent = 0
 
-    if row['Round'] == '5':
+    if sig_str_fighter > sig_str_opponent:
+        rax += sig_str_fighter - sig_str_opponent
+
+    # Rule 3: Bonus for 5-round fights
+    if '5 Rnd' in str(row.get('Time', '')) or '5' in str(row.get('round', '')):
         rax += 25
 
-    ev = row['Event Name'].lower()
-    if 'fight of the night' in ev or 'fight of night' in ev:
+    # Rule 4: Bonus for "Fight of the Night"
+    if 'Fight of the Night' in str(row.get('method_detail', '')) or 'Fight of the Night' in str(row.get('event_name', '')):
         rax += 50
-    if 'championship' in ev:
-        rax += 25
 
     return rax
-
-# --- Streamlit UI ---
 
 st.title("UFC Fighter RAX Search")
 
@@ -134,7 +161,6 @@ search_input = st.text_input("Type fighter name to search")
 
 matched_names = []
 if search_input.strip():
-    # Use difflib to get close matches ignoring case
     matched_names = difflib.get_close_matches(search_input.strip(), fighter_names, n=10, cutoff=0.3)
 
 if not matched_names and search_input.strip():
@@ -148,6 +174,7 @@ if selected_name:
     url = fighter_dict[selected_name]
     with st.spinner(f"Loading fights for {selected_name}..."):
         fights_df = get_fight_data(url)
+
     if fights_df.empty:
         st.warning("No fight data found for this fighter.")
     else:
@@ -161,6 +188,24 @@ if selected_name:
         st.markdown(f"### {selected_name} - Total RAX: {total_rax} (Adjusted: {adjusted_rax} × {rarity})")
 
         st.dataframe(
-            fights_df[['Event Name', 'Result', 'Opponent Name', 'Method Main', 'Round', 'Rax Earned']],
+            fights_df[[
+                'event_date',
+                'event_name',
+                'result',
+                'opponent_name',
+                'method_main',
+                'method_detail',
+                'round',
+                'Time',
+                'kd_fighter',
+                'kd_opponent',
+                'str_fighter',
+                'str_opponent',
+                'td_fighter',
+                'td_opponent',
+                'sub_fighter',
+                'sub_opponent',
+                'Rax Earned'
+            ]],
             use_container_width=True,
         )
