@@ -5,6 +5,8 @@ import pandas as pd
 from datetime import datetime, timedelta
 import os
 
+from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, DataReturnMode
+
 CACHE_FILE = 'ufc_rax_leaderboard.csv'
 FIGHTER_LIMIT = 10
 RARITY_MULTIPLIERS = {
@@ -16,7 +18,8 @@ RARITY_MULTIPLIERS = {
     "Iconic": 6,
 }
 
-# Utilities
+# --- Utility Functions ---
+
 def get_last_tuesday(reference_date=None):
     if reference_date is None:
         reference_date = datetime.now()
@@ -29,7 +32,8 @@ def cache_is_fresh():
     mod_time = datetime.fromtimestamp(os.path.getmtime(CACHE_FILE))
     return mod_time >= get_last_tuesday()
 
-# Scraper
+# --- Scraper Functions ---
+
 def get_fighter_urls():
     url = "http://ufcstats.com/statistics/fighters"
     response = requests.get(url)
@@ -86,6 +90,8 @@ def get_fight_data(fighter_url):
             'Round': round_val,
         })
     return pd.DataFrame(fights)
+
+# --- RAX Calculation ---
 
 def calculate_rax(row):
     rax = 0
@@ -146,57 +152,78 @@ def generate_leaderboard():
     df.insert(0, 'Rank', df.index + 1)
     return df
 
-st.title("UFC Fighter RAX Leaderboard")
+# --- Main Streamlit App ---
 
-if cache_is_fresh():
-    leaderboard_df = pd.read_csv(CACHE_FILE)
-    if 'Rank' in leaderboard_df.columns:
-        leaderboard_df.drop(columns=['Rank'], inplace=True)
-    leaderboard_df.insert(0, 'Rank', leaderboard_df.index + 1)
-    leaderboard_df['Rarity'] = 'Uncommon'
-    leaderboard_df.rename(columns={'Total Rax': 'Base Rax'}, inplace=True, errors='ignore')
-else:
-    leaderboard_df = generate_leaderboard()
-    leaderboard_df.to_csv(CACHE_FILE, index=False)
+def main():
+    st.title("UFC Fighter RAX Leaderboard with Inline Rarity Selector")
 
-# Session state to hold dataframe between runs
-if 'edited_df' not in st.session_state:
-    st.session_state.edited_df = leaderboard_df.copy()
+    if cache_is_fresh():
+        leaderboard_df = pd.read_csv(CACHE_FILE)
+        if 'Rank' in leaderboard_df.columns:
+            leaderboard_df.drop(columns=['Rank'], inplace=True)
+        leaderboard_df.insert(0, 'Rank', leaderboard_df.index + 1)
+        leaderboard_df['Rarity'] = 'Uncommon'
+        leaderboard_df.rename(columns={'Total Rax': 'Base Rax'}, inplace=True, errors='ignore')
+    else:
+        leaderboard_df = generate_leaderboard()
+        leaderboard_df.to_csv(CACHE_FILE, index=False)
 
-# Editable table for rarity selection + other info
-st.write("Edit the 'Rarity' column and click 'Recalculate Adjusted RAX'")
+    # Add initial Total Rax column for display (Base Rax * multiplier for current rarity)
+    leaderboard_df['Total Rax'] = leaderboard_df['Base Rax'] * RARITY_MULTIPLIERS['Uncommon']
+    leaderboard_df['Total Rax'] = leaderboard_df['Total Rax'].round(1)
 
-edited = st.data_editor(
-    st.session_state.edited_df,
-    column_config={
-        "Rarity": st.column_config.SelectboxColumn(
-            "Rarity",
-            options=list(RARITY_MULTIPLIERS.keys()),
-            required=True,
-        )
-    },
-    use_container_width=True,
-    num_rows="fixed"
-)
+    gb = GridOptionsBuilder.from_dataframe(leaderboard_df)
 
-# Button to recalculate Total Rax with updated rarity
-if st.button("Recalculate Adjusted RAX"):
-    # Update session state with user edits
-    st.session_state.edited_df = edited.copy()
-    # Compute adjusted RAX
-    st.session_state.edited_df['Total Rax'] = st.session_state.edited_df.apply(
-        lambda row: round(row['Base Rax'] * RARITY_MULTIPLIERS[row['Rarity']], 1),
-        axis=1
+    # Configure columns
+    gb.configure_column("Rank", editable=False, width=70)
+    gb.configure_column("Fighter Name", editable=False, width=180)
+    gb.configure_column("Fight Count", editable=False, width=100)
+    gb.configure_column("Base Rax", editable=False, hide=True)  # hide base rax, internal use only
+
+    # Rarity dropdown editable
+    gb.configure_column(
+        "Rarity",
+        editable=True,
+        cellEditor='agSelectCellEditor',
+        cellEditorParams={'values': list(RARITY_MULTIPLIERS.keys())},
+        width=120,
     )
-    # Show updated table (non-editable)
-    st.success("Adjusted RAX recalculated!")
+
+    gb.configure_column("Total Rax", editable=False, width=110)
+
+    grid_options = gb.build()
+
+    grid_response = AgGrid(
+        leaderboard_df,
+        gridOptions=grid_options,
+        update_mode=GridUpdateMode.MODEL_CHANGED,
+        data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
+        fit_columns_on_grid_load=True,
+        enable_enterprise_modules=False,
+        theme='alpine',
+        allow_unsafe_jscode=True,
+    )
+
+    updated_df = pd.DataFrame(grid_response['data'])
+
+    # Recalculate Total Rax based on rarity changes
+    def recalc_total_rax(row):
+        rarity = row['Rarity']
+        base = row['Base Rax']
+        multiplier = RARITY_MULTIPLIERS.get(rarity, 1.4)  # fallback default multiplier
+        return round(base * multiplier, 1)
+
+    updated_df['Total Rax'] = updated_df.apply(recalc_total_rax, axis=1)
+
+    # Resort leaderboard by adjusted Total Rax descending
+    updated_df = updated_df.sort_values('Total Rax', ascending=False).reset_index(drop=True)
+    updated_df['Rank'] = updated_df.index + 1
+
+    st.markdown("### Adjusted RAX Leaderboard (sorted by Total Rax)")
     st.dataframe(
-        st.session_state.edited_df[['Rank', 'Fighter Name', 'Total Rax', 'Rarity', 'Fight Count']],
-        use_container_width=True
+        updated_df[['Rank', 'Fighter Name', 'Total Rax', 'Rarity', 'Fight Count']],
+        use_container_width=True,
     )
-else:
-    # Before recalculation, just show editable table without Total Rax adjusted column
-    st.dataframe(
-        st.session_state.edited_df[['Rank', 'Fighter Name', 'Base Rax', 'Rarity', 'Fight Count']],
-        use_container_width=True
-    )
+
+if __name__ == "__main__":
+    main()
