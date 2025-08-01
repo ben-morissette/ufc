@@ -116,10 +116,13 @@ def main():
     df['Rarity'] = selections
     df['Total Rax'] = df.apply(lambda r: round(r['Base Rax'] * RARITY_MULTIPLIERS[r['Rarity']], 1), axis=1)
     df = df.sort_values(by='Total Rax', ascending=False).reset_index(drop=True)
+    if 'Rank' in df.columns:
+        df.drop(columns=['Rank'], inplace=True)
     df.insert(0, 'Rank', df.index + 1)
     st.markdown("---")
     st.markdown("### Final Leaderboard")
     st.dataframe(df[['Rank','Fighter Name','Total Rax','Rarity']], use_container_width=True)
+
 
 if __name__ == "__main__":
     main()
