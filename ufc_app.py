@@ -2,36 +2,42 @@ import streamlit as st
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
+import string
 
-def get_fighter_url_by_name(name):
+def fetch_all_fighters():
     base_url = "http://ufcstats.com/statistics/fighters"
-    page = 1
-    name_lower = name.lower()
+    fighters = []
 
-    while True:
-        url = f"{base_url}/?page={page}"
-        response = requests.get(url)
-        soup = BeautifulSoup(response.text, "html.parser")
+    for char in string.ascii_uppercase:
+        url = f"{base_url}?char={char}"
+        resp = requests.get(url)
+        soup = BeautifulSoup(resp.text, "html.parser")
         table = soup.find("table", class_="b-statistics__table")
         if not table:
-            break
-
+            continue
         rows = table.find("tbody").find_all("tr")
-        if not rows:
-            break
-
         for row in rows:
             link = row.find_all("td")[0].find("a", class_="b-link_style_black")
-            if link and name_lower in link.text.strip().lower():
-                return link["href"]
+            if link:
+                name = link.text.strip()
+                href = link['href']
+                fighters.append({"name": name, "url": href})
+    return fighters
 
-        page += 1
+@st.cache_data(show_spinner=False)
+def get_fighters_cached():
+    return fetch_all_fighters()
 
+def get_fighter_url(name, fighters):
+    name_lower = name.lower()
+    for f in fighters:
+        if f["name"].lower() == name_lower:
+            return f["url"]
     return None
 
 def get_fight_data(fighter_url):
-    response = requests.get(fighter_url)
-    soup = BeautifulSoup(response.text, "html.parser")
+    resp = requests.get(fighter_url)
+    soup = BeautifulSoup(resp.text, "html.parser")
     table = soup.find("table", class_="b-fight-details__table_type_event-details")
     if not table:
         return pd.DataFrame()
@@ -46,6 +52,7 @@ def get_fight_data(fighter_url):
         event_name = cols[6].find_all("p")[0].get_text(strip=True)
         method = cols[7].find_all("p")[0].get_text(strip=True)
         round_val = cols[8].find("p").get_text(strip=True)
+
         fights.append({
             "Result": result,
             "Fighter Name": fighter_name,
@@ -86,19 +93,21 @@ def calculate_rax(row):
 
 st.title("UFC Fighter RAX Search")
 
-fighter_name_input = st.text_input("Enter fighter full name (e.g., Conor McGregor):")
+# Cache all fighters once
+fighters = get_fighters_cached()
+
+fighter_name_input = st.text_input("Enter full fighter name (e.g., Conor McGregor)")
 
 if fighter_name_input:
-    with st.spinner("Fetching fighter info..."):
-        fighter_url = get_fighter_url_by_name(fighter_name_input.strip())
-        if fighter_url:
-            fights_df = get_fight_data(fighter_url)
-            if fights_df.empty:
-                st.warning("No fight data found for this fighter.")
-            else:
-                fights_df["Rax Earned"] = fights_df.apply(calculate_rax, axis=1)
-                total_rax = fights_df["Rax Earned"].sum()
-                st.write(f"Total RAX for **{fighter_name_input}**: {total_rax}")
-                st.dataframe(fights_df)
+    fighter_url = get_fighter_url(fighter_name_input.strip(), fighters)
+    if fighter_url:
+        fights_df = get_fight_data(fighter_url)
+        if fights_df.empty:
+            st.warning("No fight data found for this fighter.")
         else:
-            st.error("Fighter not found. Please check the name and try again.")
+            fights_df["Rax Earned"] = fights_df.apply(calculate_rax, axis=1)
+            total_rax = fights_df["Rax Earned"].sum()
+            st.write(f"Total RAX for **{fighter_name_input}**: {total_rax}")
+            st.dataframe(fights_df)
+    else:
+        st.error("Fighter not found. Please check the name and try again.")
