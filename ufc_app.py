@@ -3,12 +3,6 @@ import requests
 from bs4 import BeautifulSoup
 import pandas as pd
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                  "AppleWebKit/537.36 (KHTML, like Gecko) "
-                  "Chrome/115.0 Safari/537.36"
-}
-
 RARITY_MULTIPLIERS = {
     "Uncommon": 1.4,
     "Rare": 1.6,
@@ -18,32 +12,6 @@ RARITY_MULTIPLIERS = {
     "Iconic": 6,
 }
 
-def get_all_fighters():
-    fighters = {}
-    base_url = "http://ufcstats.com/statistics/fighters?char={letter}&page={page}"
-    for letter in "abcdefghijklmnopqrstuvwxyz":
-        page = 1
-        while True:
-            url = base_url.format(letter=letter, page=page)
-            response = requests.get(url, headers=HEADERS)
-            if response.status_code != 200:
-                break
-            soup = BeautifulSoup(response.text, 'html.parser')
-            table = soup.find('table', class_='b-statistics__table')
-            if not table:
-                break
-            rows = table.find('tbody').find_all('tr', class_='b-statistics__table-row')
-            if not rows:
-                break
-            for row in rows:
-                link = row.find_all('td')[0].find('a', class_='b-link_style_black')
-                if link and link.has_attr('href'):
-                    name = link.text.strip()
-                    href = link['href']
-                    fighters[name.lower()] = (name, href)
-            page += 1
-    return fighters
-
 def get_two_values_from_col(col):
     ps = col.find_all('p', class_='b-fight-details__table-text')
     if len(ps) == 2:
@@ -52,7 +20,7 @@ def get_two_values_from_col(col):
         return None, None
 
 def get_fight_data(fighter_url):
-    response = requests.get(fighter_url, headers=HEADERS)
+    response = requests.get(fighter_url)
     soup = BeautifulSoup(response.text, 'html.parser')
     table = soup.find('table', class_='b-fight-details__table_type_event-details')
     if not table:
@@ -150,31 +118,45 @@ def calculate_rax(row):
 
     return rax
 
+def find_fighter_url(search_name):
+    search_name = search_name.strip().lower()
+    base_url = "http://ufcstats.com/statistics/fighters?char={letter}&page={page}"
+    first_letter = search_name[0] if search_name else ''
+    if first_letter < 'a' or first_letter > 'z':
+        return None
+    page = 1
+    while True:
+        url = base_url.format(letter=first_letter, page=page)
+        response = requests.get(url)
+        if response.status_code != 200:
+            return None
+        soup = BeautifulSoup(response.text, 'html.parser')
+        table = soup.find('table', class_='b-statistics__table')
+        if not table:
+            return None
+        rows = table.find('tbody').find_all('tr', class_='b-statistics__table-row')
+        if not rows:
+            return None
+        for row in rows:
+            link = row.find_all('td')[0].find('a', class_='b-link_style_black')
+            if link and link.has_attr('href'):
+                name = link.text.strip()
+                if name.lower() == search_name:
+                    return link['href']
+        page += 1
+
 st.title("UFC Fighter RAX Search")
-
-@st.cache_data(show_spinner=False)
-def load_all_fighters():
-    fighters = get_all_fighters()
-    return fighters
-
-fighter_dict = load_all_fighters()
-
-st.write(f"Loaded {len(fighter_dict)} fighters.")
-if 'jon jones' in fighter_dict:
-    st.write("Jon Jones is found!")
-else:
-    st.write("Jon Jones is NOT found!")
 
 search_input = st.text_input("Enter fighter full name exactly (case insensitive)")
 
 if search_input.strip():
-    key = search_input.strip().lower()
-    if key not in fighter_dict:
+    with st.spinner(f"Searching for fighter '{search_input}'..."):
+        fighter_url = find_fighter_url(search_input)
+    if not fighter_url:
         st.warning(f"Fighter '{search_input}' not found. Please check spelling or try another name.")
     else:
-        original_name, url = fighter_dict[key]
-        with st.spinner(f"Loading fights for {original_name}..."):
-            fights_df = get_fight_data(url)
+        with st.spinner(f"Loading fights for {search_input}..."):
+            fights_df = get_fight_data(fighter_url)
 
         if fights_df.empty:
             st.warning("No fight data found for this fighter.")
@@ -186,7 +168,7 @@ if search_input.strip():
             multiplier = RARITY_MULTIPLIERS[rarity]
             adjusted_rax = round(total_rax * multiplier, 1)
 
-            st.markdown(f"### {original_name} - Total RAX: {total_rax} (Adjusted: {adjusted_rax} × {rarity})")
+            st.markdown(f"### {search_input.strip()} - Total RAX: {total_rax} (Adjusted: {adjusted_rax} × {rarity})")
 
             st.dataframe(
                 fights_df[[
