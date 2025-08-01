@@ -135,6 +135,7 @@ def generate_leaderboard():
                 'Fighter Name': name,
                 'Base Rax': total_rax,
                 'Fight Count': len(fights_df),
+                'Rarity': 'Uncommon',
             })
         except Exception:
             continue
@@ -160,29 +161,26 @@ def cache_and_load_leaderboard():
         df.insert(0, 'Rank', df.index + 1)
         return df
 
-# Streamlit app starts here
 st.title("UFC Fighter RAX Leaderboard")
 
 leaderboard_df = cache_and_load_leaderboard()
 
-rarity_selections = []
+col_widths = [2, 1, 1, 1]
 
-# Define column widths proportionally for table-like look
-col_widths = [1, 1, 0.7, 0.7]
-
-# Display header row with bold font
+# Header row
 header_cols = st.columns(col_widths)
 header_cols[0].markdown("**Fighter Name**")
 header_cols[1].markdown("**Rarity**")
 header_cols[2].markdown("**Base Rax**")
 header_cols[3].markdown("**Total Rax**")
 
-# Display each fighter row with aligned columns and dropdown in rarity column
+rarity_selections = []
+
 for idx, row in leaderboard_df.iterrows():
     cols = st.columns(col_widths)
     cols[0].write(row['Fighter Name'])
     selected_rarity = cols[1].selectbox(
-        f"rarity_{idx}",
+        "",  # <-- No label here
         options=list(RARITY_MULTIPLIERS.keys()),
         index=list(RARITY_MULTIPLIERS.keys()).index(row['Rarity']) if row['Rarity'] in RARITY_MULTIPLIERS else 0,
         key=f"rarity_select_{idx}"
@@ -190,10 +188,8 @@ for idx, row in leaderboard_df.iterrows():
     cols[2].write(row['Base Rax'])
     total_rax = round(row['Base Rax'] * RARITY_MULTIPLIERS[selected_rarity], 1)
     cols[3].write(total_rax)
-
     rarity_selections.append(selected_rarity)
 
-# Create summary DataFrame with recalculated total rax based on selections
 summary_df = leaderboard_df.copy()
 summary_df['Rarity'] = rarity_selections
 summary_df['Total Rax'] = summary_df.apply(
