@@ -157,55 +157,53 @@ with st.spinner("Loading fighter list (this may take a moment)..."):
 
 fighter_names = list(fighter_dict.keys())
 
-search_input = st.text_input("Type fighter name to search")
+search_input = st.text_input("Type full or partial fighter name and press Enter")
 
-matched_names = []
 if search_input.strip():
-    matched_names = difflib.get_close_matches(search_input.strip(), fighter_names, n=10, cutoff=0.3)
-
-if not matched_names and search_input.strip():
-    st.warning("No fighters matched your search. Try a different name or spelling.")
-
-selected_name = None
-if matched_names:
-    selected_name = st.selectbox("Select a fighter from matches", [""] + matched_names)
-
-if selected_name:
-    url = fighter_dict[selected_name]
-    with st.spinner(f"Loading fights for {selected_name}..."):
-        fights_df = get_fight_data(url)
-
-    if fights_df.empty:
-        st.warning("No fight data found for this fighter.")
+    # Try to find best match, fallback to no results
+    matches = difflib.get_close_matches(search_input.strip(), fighter_names, n=1, cutoff=0.3)
+    if not matches:
+        st.warning("No fighters matched your search. Try a different name or spelling.")
     else:
-        fights_df['Rax Earned'] = fights_df.apply(calculate_rax, axis=1)
-        total_rax = fights_df['Rax Earned'].sum()
+        selected_name = matches[0]
+        url = fighter_dict[selected_name]
 
-        rarity = st.selectbox("Select Rarity Multiplier", list(RARITY_MULTIPLIERS.keys()), index=0)
-        multiplier = RARITY_MULTIPLIERS[rarity]
-        adjusted_rax = round(total_rax * multiplier, 1)
+        with st.spinner(f"Loading fights for {selected_name}..."):
+            fights_df = get_fight_data(url)
 
-        st.markdown(f"### {selected_name} - Total RAX: {total_rax} (Adjusted: {adjusted_rax} × {rarity})")
+        if fights_df.empty:
+            st.warning("No fight data found for this fighter.")
+        else:
+            fights_df['Rax Earned'] = fights_df.apply(calculate_rax, axis=1)
+            total_rax = fights_df['Rax Earned'].sum()
 
-        st.dataframe(
-            fights_df[[
-                'event_date',
-                'event_name',
-                'result',
-                'opponent_name',
-                'method_main',
-                'method_detail',
-                'round',
-                'Time',
-                'kd_fighter',
-                'kd_opponent',
-                'str_fighter',
-                'str_opponent',
-                'td_fighter',
-                'td_opponent',
-                'sub_fighter',
-                'sub_opponent',
-                'Rax Earned'
-            ]],
-            use_container_width=True,
-        )
+            rarity = st.selectbox("Select Rarity Multiplier", list(RARITY_MULTIPLIERS.keys()), index=0)
+            multiplier = RARITY_MULTIPLIERS[rarity]
+            adjusted_rax = round(total_rax * multiplier, 1)
+
+            st.markdown(f"### {selected_name} - Total RAX: {total_rax} (Adjusted: {adjusted_rax} × {rarity})")
+
+            st.dataframe(
+                fights_df[[
+                    'event_date',
+                    'event_name',
+                    'result',
+                    'opponent_name',
+                    'method_main',
+                    'method_detail',
+                    'round',
+                    'Time',
+                    'kd_fighter',
+                    'kd_opponent',
+                    'str_fighter',
+                    'str_opponent',
+                    'td_fighter',
+                    'td_opponent',
+                    'sub_fighter',
+                    'sub_opponent',
+                    'Rax Earned'
+                ]],
+                use_container_width=True,
+            )
+else:
+    st.info("Please type a fighter's name above and press Enter to search.")
