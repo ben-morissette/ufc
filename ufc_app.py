@@ -4,6 +4,7 @@ from bs4 import BeautifulSoup
 import pandas as pd
 from datetime import datetime, timedelta
 import os
+from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 
 CACHE_FILE = 'ufc_rax_leaderboard.csv'
 FIGHTER_LIMIT = 10
@@ -125,7 +126,7 @@ def calculate_rax(row):
 def generate_leaderboard():
     fighter_urls = get_fighter_urls()
     leaderboard = []
-    for idx, url in enumerate(fighter_urls):
+    for url in fighter_urls:
         try:
             fights_df = get_fight_data(url)
             if fights_df.empty:
@@ -139,51 +140,66 @@ def generate_leaderboard():
                 'Fight Count': len(fights_df),
                 'Rarity': 'Uncommon',
             })
-        except Exception as e:
+        except Exception:
             continue
     df = pd.DataFrame(leaderboard)
     df = df.sort_values(by='Base Rax', ascending=False).reset_index(drop=True)
     df.insert(0, 'Rank', df.index + 1)
     return df
 
-# Streamlit UI
+def recalc_total_rax(df):
+    df["Total Rax"] = df.apply(lambda r: round(r["Base Rax"] * RARITY_MULTIPLIERS.get(r["Rarity"], 1.4), 1), axis=1)
+    df.sort_values("Total Rax", ascending=False, inplace=True)
+    df.reset_index(drop=True, inplace=True)
+    df["Rank"] = df.index + 1
+    return df
+
 st.title("UFC Fighter RAX Leaderboard")
 
 if cache_is_fresh():
     leaderboard_df = pd.read_csv(CACHE_FILE)
+    # Clean and fix rank and rarity
     if 'Rank' in leaderboard_df.columns:
         leaderboard_df.drop(columns=['Rank'], inplace=True)
     leaderboard_df.insert(0, 'Rank', leaderboard_df.index + 1)
-    leaderboard_df['Rarity'] = 'Uncommon'
-    leaderboard_df.rename(columns={'Total Rax': 'Base Rax'}, inplace=True, errors='ignore')
+    leaderboard_df['Rarity'] = leaderboard_df.get('Rarity', 'Uncommon')
 else:
     leaderboard_df = generate_leaderboard()
     leaderboard_df.to_csv(CACHE_FILE, index=False)
 
-# Editable leaderboard
-edited_df = st.data_editor(
+leaderboard_df = recalc_total_rax(leaderboard_df)
+
+gb = GridOptionsBuilder.from_dataframe(leaderboard_df)
+gb.configure_column("Rank", editable=False, width=70)
+gb.configure_column("Fighter Name", editable=False, width=200)
+gb.configure_column("Fight Count", editable=False, width=110)
+gb.configure_column("Base Rax", editable=False, hide=True)
+gb.configure_column(
+    "Rarity",
+    editable=True,
+    cellEditor="agSelectCellEditor",
+    cellEditorParams={"values": list(RARITY_MULTIPLIERS.keys())},
+    width=140,
+)
+gb.configure_column("Total Rax", editable=False, width=110, sort="desc")
+
+grid_options = gb.build()
+
+grid_response = AgGrid(
     leaderboard_df,
-    column_config={
-        "Rarity": st.column_config.SelectboxColumn(
-            "Rarity",
-            help="Choose rarity multiplier",
-            options=list(RARITY_MULTIPLIERS.keys()),
-            required=True,
-        )
-    },
-    use_container_width=True,
-    num_rows="fixed"
+    gridOptions=grid_options,
+    update_mode=GridUpdateMode.MODEL_CHANGED,
+    allow_unsafe_jscode=True,
+    theme="alpine",
+    height=600,
+    fit_columns_on_grid_load=True,
 )
 
-# ✅ FIXED apply round inside lambda
-edited_df['Total Rax'] = edited_df.apply(
-    lambda row: round(row['Base Rax'] * RARITY_MULTIPLIERS[row['Rarity']], 1),
-    axis=1
-)
+updated_df = pd.DataFrame(grid_response["data"])
+updated_df = recalc_total_rax(updated_df)
 
-# Display updated leaderboard
-st.markdown("### Adjusted RAX Leaderboard")
+st.markdown("### Adjusted Leaderboard (Sorted by Total Rax)")
 st.dataframe(
-    edited_df[['Rank', 'Fighter Name', 'Total Rax', 'Rarity', 'Fight Count']],
-    use_container_width=True
+    updated_df[["Rank", "Fighter Name", "Total Rax", "Rarity", "Fight Count"]],
+    use_container_width=True,
 )
