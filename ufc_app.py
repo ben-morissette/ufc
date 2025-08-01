@@ -1,9 +1,7 @@
 import streamlit as st
+import requests
+from bs4 import BeautifulSoup
 import pandas as pd
-import os
-from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, DataReturnMode
-
-CACHE_FILE = "ufc_rax_leaderboard.csv"
 
 RARITY_MULTIPLIERS = {
     "Uncommon": 1.4,
@@ -14,84 +12,113 @@ RARITY_MULTIPLIERS = {
     "Iconic": 6,
 }
 
-def cache_is_fresh():
-    if not os.path.exists(CACHE_FILE):
-        return False
-    # Simplified freshness check for demo
-    return True
+def get_fighter_url_by_name(name):
+    # Search UFC stats fighter list to find the URL for the fighter name
+    url = "http://ufcstats.com/statistics/fighters"
+    response = requests.get(url)
+    soup = BeautifulSoup(response.text, "html.parser")
+    table = soup.find("table", class_="b-statistics__table")
+    rows = table.find("tbody").find_all("tr")
+    for row in rows:
+        link = row.find_all("td")[0].find("a", class_="b-link_style_black")
+        if link and link.text.strip().lower() == name.lower():
+            return link["href"]
+    return None
 
-def load_leaderboard():
-    # For this example, just load CSV, ensure columns exist
-    df = pd.read_csv(CACHE_FILE)
-    if 'Rarity' not in df.columns:
-        df['Rarity'] = 'Uncommon'
-    # Make sure all Rax rarity columns exist:
-    for rarity in RARITY_MULTIPLIERS.keys():
-        col_name = f"Rax_{rarity}"
-        if col_name not in df.columns:
-            df[col_name] = df['Base Rax'] * RARITY_MULTIPLIERS[rarity]
-    return df
+def get_two_values_from_col(col):
+    ps = col.find_all("p", class_="b-fight-details__table-text")
+    return (ps[0].get_text(strip=True), ps[1].get_text(strip=True)) if len(ps) == 2 else (None, None)
 
-def calculate_total_rax(df):
-    # Use row-wise apply with getattr-like access to rarities
-    def get_total_rax(row):
-        rarity = row['Rarity']
-        col_name = f"Rax_{rarity}"
-        return row[col_name]
-    df['Total Rax'] = df.apply(get_total_rax, axis=1)
-    return df
+def get_fight_data(fighter_url):
+    response = requests.get(fighter_url)
+    soup = BeautifulSoup(response.text, "html.parser")
+    table = soup.find("table", class_="b-fight-details__table_type_event-details")
+    if not table:
+        return pd.DataFrame()
 
-def main():
-    st.set_page_config(layout="wide")
-    st.title("UFC Fighter RAX Leaderboard with Editable Rarity")
+    rows = table.find("tbody").find_all("tr", class_="b-fight-details__table-row__hover")
+    fights = []
+    for row in rows:
+        cols = row.find_all("td", class_="b-fight-details__table-col")
+        result = cols[0].find("p").get_text(strip=True).lower()
+        fighter_name = cols[1].find_all("p")[0].get_text(strip=True)
+        opponent_name = cols[1].find_all("p")[1].get_text(strip=True)
+        kd_f, kd_o = get_two_values_from_col(cols[2])
+        str_f, str_o = get_two_values_from_col(cols[3])
+        td_f, td_o = get_two_values_from_col(cols[4])
+        sub_f, sub_o = get_two_values_from_col(cols[5])
+        event_name = cols[6].find_all("p")[0].get_text(strip=True)
+        method = cols[7].find_all("p")[0].get_text(strip=True)
+        round_val = cols[8].find("p").get_text(strip=True)
 
-    df = load_leaderboard()
+        fights.append({
+            "Result": result,
+            "Fighter Name": fighter_name,
+            "Opponent Name": opponent_name,
+            "KD Fighter": kd_f,
+            "KD Opponent": kd_o,
+            "Strikes Fighter": str_f,
+            "Strikes Opponent": str_o,
+            "Takedowns Fighter": td_f,
+            "Takedowns Opponent": td_o,
+            "Submission Attempts Fighter": sub_f,
+            "Submission Attempts Opponent": sub_o,
+            "Event Name": event_name,
+            "Method Main": method,
+            "Round": round_val,
+        })
+    return pd.DataFrame(fights)
 
-    # AgGrid setup
-    gb = GridOptionsBuilder.from_dataframe(df)
+def calculate_rax(row):
+    rax = 0
+    if row["Result"] == "win":
+        method = row["Method Main"]
+        if method == "KO/TKO":
+            rax += 100
+        elif method in ["Submission", "SUB"]:
+            rax += 90
+        elif method in ["Decision - Unanimous", "U-DEC"]:
+            rax += 80
+        elif method == "Decision - Majority":
+            rax += 75
+        elif method == "Decision - Split":
+            rax += 70
+    elif row["Result"] == "loss":
+        rax += 25
 
-    # Configure columns:
-    gb.configure_column("Rank", header_name="Rank", sortable=True, filter=True, width=70)
-    gb.configure_column("Fighter Name", header_name="Fighter Name", sortable=True, filter=True, width=250)
-    gb.configure_column("Base Rax", header_name="Base Rax", sortable=True, filter=True, width=100)
-    gb.configure_column("Total Rax", header_name="Total Rax", sortable=True, filter=True, width=120)
-    
-    # Rarity as editable dropdown
-    gb.configure_column(
-        "Rarity",
-        header_name="Rarity",
-        editable=True,
-        cellEditor='agSelectCellEditor',
-        cellEditorParams={'values': list(RARITY_MULTIPLIERS.keys())},
-        width=140,
-        filter=True,
-    )
+    try:
+        strike_diff = int(row["Strikes Fighter"]) - int(row["Strikes Opponent"])
+        if strike_diff > 0:
+            rax += strike_diff
+    except:
+        pass
 
-    grid_options = gb.build()
+    if row["Round"] == "5":
+        rax += 25
 
-    # Show the grid, enable editing
-    grid_response = AgGrid(
-        df,
-        gridOptions=grid_options,
-        update_mode=GridUpdateMode.MODEL_CHANGED,
-        data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
-        fit_columns_on_grid_load=True,
-        enable_enterprise_modules=False,
-        height=600,
-        reload_data=False,
-    )
+    ev = row["Event Name"].lower()
+    if "fight of the night" in ev or "fight of night" in ev:
+        rax += 50
+    if "championship" in ev:
+        rax += 25
 
-    updated_df = pd.DataFrame(grid_response['data'])
+    return rax
 
-    # Calculate Total Rax based on updated rarity selections
-    updated_df = calculate_total_rax(updated_df)
+st.title("UFC Fighter RAX Search")
 
-    # Sort by Total Rax descending
-    updated_df = updated_df.sort_values(by='Total Rax', ascending=False).reset_index(drop=True)
-    updated_df.insert(0, 'Rank', updated_df.index + 1)
+fighter_name_input = st.text_input("Enter fighter full name (e.g., Conor McGregor):")
 
-    st.markdown("### Updated Leaderboard (sorted by Total Rax)")
-    st.dataframe(updated_df[['Rank', 'Fighter Name', 'Total Rax', 'Rarity']], use_container_width=True)
-
-if __name__ == "__main__":
-    main()
+if fighter_name_input:
+    with st.spinner("Fetching fighter info..."):
+        fighter_url = get_fighter_url_by_name(fighter_name_input.strip())
+        if fighter_url:
+            fights_df = get_fight_data(fighter_url)
+            if fights_df.empty:
+                st.warning("No fight data found for this fighter.")
+            else:
+                fights_df["Rax Earned"] = fights_df.apply(calculate_rax, axis=1)
+                total_rax = fights_df["Rax Earned"].sum()
+                st.write(f"Total RAX for **{fighter_name_input}**: {total_rax}")
+                st.dataframe(fights_df)
+        else:
+            st.error("Fighter not found. Please check the name and try again.")
