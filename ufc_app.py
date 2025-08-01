@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 from difflib import get_close_matches
 
-# --- Fighter Search Helpers ---
+# --- Helper Functions ---
 
 def search_fighter_by_name_part(query):
     url = "http://ufcstats.com/statistics/fighters/search"
@@ -75,8 +75,6 @@ def get_fighter_url_by_name(fighter_name):
             return candidates[0][1]
         else:
             return candidates[0][1]
-
-# --- Fight Data Scraping ---
 
 def get_two_values_from_col(col):
     ps = col.find_all('p', class_='b-fight-details__table-text')
@@ -308,62 +306,42 @@ def parse_per_round_totals(soup, main_fighter_name):
         sub_att = get_two_vals_from_cell(cells[6])
         rev = get_two_vals_from_cell(cells[7])
         ctrl = get_two_vals_from_cell(cells[8])
-
-        if ctrl is not None:
-            ctrl_f1, ctrl_f2 = ctrl
-            ctrl_f1 = ctrl_to_seconds(ctrl_f1)
-            ctrl_f2 = ctrl_to_seconds(ctrl_f2)
-        else:
-            ctrl_f1, ctrl_f2 = None, None
-
-        def assign_vals(val_pair):
-            if val_pair is None:
-                return None, None
-            v1, v2 = val_pair
-            return (v1, v2)
-
-        kd_f1, kd_f2 = assign_vals(kd)
-        sig_str_f1, sig_str_f2 = assign_vals(sig_str)
-        sig_str_pct_f1, sig_str_pct_f2 = assign_vals(sig_str_pct)
-        total_str_f1, total_str_f2 = assign_vals(total_str)
-        td_pct_f1, td_pct_f2 = assign_vals(td_pct)
-        sub_att_f1, sub_att_f2 = assign_vals(sub_att)
-        rev_f1, rev_f2 = assign_vals(rev)
+        ctrl = (ctrl[0], ctrl[1])
 
         if main_is_first:
-            data[f'Rnd{round_name}_fighter_KD'] = kd_f1
-            data[f'Rnd{round_name}_opponent_KD'] = kd_f2
-            data[f'Rnd{round_name}_fighter_SigStr'] = sig_str_f1
-            data[f'Rnd{round_name}_opponent_SigStr'] = sig_str_f2
-            data[f'Rnd{round_name}_fighter_SigStr_pct'] = sig_str_pct_f1
-            data[f'Rnd{round_name}_opponent_SigStr_pct'] = sig_str_pct_f2
-            data[f'Rnd{round_name}_fighter_Str'] = total_str_f1
-            data[f'Rnd{round_name}_opponent_Str'] = total_str_f2
-            data[f'Rnd{round_name}_fighter_Td_pct'] = td_pct_f1
-            data[f'Rnd{round_name}_opponent_Td_pct'] = td_pct_f2
-            data[f'Rnd{round_name}_fighter_SubAtt'] = sub_att_f1
-            data[f'Rnd{round_name}_opponent_SubAtt'] = sub_att_f2
-            data[f'Rnd{round_name}_fighter_Rev'] = rev_f1
-            data[f'Rnd{round_name}_opponent_Rev'] = rev_f2
-            data[f'Rnd{round_name}_fighter_Ctrl'] = ctrl_f1
-            data[f'Rnd{round_name}_opponent_Ctrl'] = ctrl_f2
+            data[f'PR_{round_name}_KD'] = kd[0]
+            data[f'PR_{round_name}_KD_opponent'] = kd[1]
+            data[f'PR_{round_name}_SigStr'] = sig_str[0]
+            data[f'PR_{round_name}_SigStr_opponent'] = sig_str[1]
+            data[f'PR_{round_name}_SigStr_pct'] = sig_str_pct[0]
+            data[f'PR_{round_name}_SigStr_pct_opponent'] = sig_str_pct[1]
+            data[f'PR_{round_name}_Str'] = total_str[0]
+            data[f'PR_{round_name}_Str_opponent'] = total_str[1]
+            data[f'PR_{round_name}_Td_pct'] = td_pct[0]
+            data[f'PR_{round_name}_Td_pct_opponent'] = td_pct[1]
+            data[f'PR_{round_name}_SubAtt'] = sub_att[0]
+            data[f'PR_{round_name}_SubAtt_opponent'] = sub_att[1]
+            data[f'PR_{round_name}_Rev'] = rev[0]
+            data[f'PR_{round_name}_Rev_opponent'] = rev[1]
+            data[f'PR_{round_name}_Ctrl'] = ctrl[0]
+            data[f'PR_{round_name}_Ctrl_opponent'] = ctrl[1]
         else:
-            data[f'Rnd{round_name}_fighter_KD'] = kd_f2
-            data[f'Rnd{round_name}_opponent_KD'] = kd_f1
-            data[f'Rnd{round_name}_fighter_SigStr'] = sig_str_f2
-            data[f'Rnd{round_name}_opponent_SigStr'] = sig_str_f1
-            data[f'Rnd{round_name}_fighter_SigStr_pct'] = sig_str_pct_f2
-            data[f'Rnd{round_name}_opponent_SigStr_pct'] = sig_str_pct_f1
-            data[f'Rnd{round_name}_fighter_Str'] = total_str_f2
-            data[f'Rnd{round_name}_opponent_Str'] = total_str_f1
-            data[f'Rnd{round_name}_fighter_Td_pct'] = td_pct_f2
-            data[f'Rnd{round_name}_opponent_Td_pct'] = td_pct_f1
-            data[f'Rnd{round_name}_fighter_SubAtt'] = sub_att_f2
-            data[f'Rnd{round_name}_opponent_SubAtt'] = sub_att_f1
-            data[f'Rnd{round_name}_fighter_Rev'] = rev_f2
-            data[f'Rnd{round_name}_opponent_Rev'] = rev_f1
-            data[f'Rnd{round_name}_fighter_Ctrl'] = ctrl_f2
-            data[f'Rnd{round_name}_opponent_Ctrl'] = ctrl_f1
+            data[f'PR_{round_name}_KD'] = kd[1]
+            data[f'PR_{round_name}_KD_opponent'] = kd[0]
+            data[f'PR_{round_name}_SigStr'] = sig_str[1]
+            data[f'PR_{round_name}_SigStr_opponent'] = sig_str[0]
+            data[f'PR_{round_name}_SigStr_pct'] = sig_str_pct[1]
+            data[f'PR_{round_name}_SigStr_pct_opponent'] = sig_str_pct[0]
+            data[f'PR_{round_name}_Str'] = total_str[1]
+            data[f'PR_{round_name}_Str_opponent'] = total_str[0]
+            data[f'PR_{round_name}_Td_pct'] = td_pct[1]
+            data[f'PR_{round_name}_Td_pct_opponent'] = td_pct[0]
+            data[f'PR_{round_name}_SubAtt'] = sub_att[1]
+            data[f'PR_{round_name}_SubAtt_opponent'] = sub_att[0]
+            data[f'PR_{round_name}_Rev'] = rev[1]
+            data[f'PR_{round_name}_Rev_opponent'] = rev[0]
+            data[f'PR_{round_name}_Ctrl'] = ctrl[1]
+            data[f'PR_{round_name}_Ctrl_opponent'] = ctrl[0]
 
     return data
 
@@ -372,129 +350,126 @@ def parse_fight_details(fight_link, main_fighter_name, opponent_name):
     response.raise_for_status()
     soup = BeautifulSoup(response.text, 'html.parser')
 
-    # Parse totals
+    fight_info = {}
+    # Attempt to parse additional details like 'Details', 'TimeFormat', 'TotalRoundTime'
+    details_tag = soup.find('p', class_='b-fight-details__text-item_first')
+    fight_info['Details'] = details_tag.get_text(strip=True) if details_tag else ''
+
+    time_format_tag = soup.find('p', class_='b-fight-details__text-item')
+    fight_info['TimeFormat'] = time_format_tag.get_text(strip=True) if time_format_tag else ''
+
+    total_round_time_tag = soup.find('span', class_='b-fight-details__time')
+    fight_info['TotalRoundTime'] = total_round_time_tag.get_text(strip=True) if total_round_time_tag else ''
+
+    # Add fight link, fighters for merging
+    fight_info['fight_link'] = fight_link
+    fight_info['fighter_name'] = main_fighter_name
+    fight_info['opponent_name'] = opponent_name
+
+    # Parse Totals Table
     totals_data = parse_totals_table(soup, main_fighter_name)
-    # Parse per round totals
+    fight_info.update(totals_data)
+
+    # Parse Per Round Totals Table
     per_round_data = parse_per_round_totals(soup, main_fighter_name)
+    fight_info.update(per_round_data)
 
-    # Get Details (Fight of the Night, etc)
-    details_tag = soup.find('p', class_='b-fight-details__text')
-    details = details_tag.get_text(strip=True) if details_tag else ''
-
-    # Get TimeFormat (e.g. "5 Rnd")
-    timeformat_tag = soup.find('p', class_='b-fight-details__text_time-format')
-    timeformat = timeformat_tag.get_text(strip=True) if timeformat_tag else ''
-
-    # Merge all details into a dict
-    fight_details = {
-        'Details': details,
-        'TimeFormat': timeformat,
-        'fighter_name': main_fighter_name,
-        'opponent_name': opponent_name,
-        'fight_link': fight_link,
-    }
-    fight_details.update(totals_data)
-    fight_details.update(per_round_data)
-    return fight_details
+    return fight_info
 
 def transform_columns(df):
-    # You can add any needed cleaning or transforming here
-    # For example, convert rax columns to numeric if needed
+    # Clean column names and convert numeric fields where possible
+    for col in df.columns:
+        if col.startswith('TOT_') or col.startswith('PR_'):
+            try:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+            except Exception:
+                pass
     return df
 
 def calculate_rax(row):
     rax = 0
-    if row.get('result') == 'win':
-        if row.get('method_main') == 'KO/TKO':
+    result = str(row.get('result', '')).lower()
+    method = str(row.get('method_main', '')).strip().lower()
+
+    if result == 'win':
+        if method in ['ko/tko']:
             rax += 100
-        elif row.get('method_main') == 'Submission':
+        elif method in ['submission', 'sub']:
             rax += 90
-        elif row.get('method_main') == 'Decision - Unanimous':
+        elif method in ['decision - unanimous', 'u-dec']:
             rax += 80
-        elif row.get('method_main') == 'Decision - Majority':
+        elif method in ['decision - majority', 'm-dec']:
             rax += 75
-        elif row.get('method_main') == 'Decision - Split':
+        elif method in ['decision - split', 's-dec']:
             rax += 70
-    elif row.get('result') == 'loss':
+    elif result == 'loss':
         rax += 25
 
-    sig_str_fighter = 0
-    sig_str_opponent = 0
-    if 'TOT_fighter_SigStr' in row and 'TOT_opponent_SigStr' in row:
-        try:
-            sig_str_fighter = float(row['TOT_fighter_SigStr'])
-            sig_str_opponent = float(row['TOT_opponent_SigStr'])
-        except:
-            pass
+    # Significant strike difference
+    try:
+        sig_str_fighter = float(row.get('TOT_fighter_SigStr', 0))
+        sig_str_opponent = float(row.get('TOT_opponent_SigStr', 0))
+    except:
+        sig_str_fighter = 0
+        sig_str_opponent = 0
 
     if sig_str_fighter > sig_str_opponent:
         rax += sig_str_fighter - sig_str_opponent
 
-    if 'TimeFormat' in row and '5 Rnd' in str(row['TimeFormat']):
+    # Bonus for 5-round fights
+    time_format = str(row.get('TimeFormat', ''))
+    if '5 Rnd' in time_format:
         rax += 25
 
-    if 'Details' in row and 'Fight of the Night' in str(row['Details']):
+    # Bonus for Fight of the Night
+    details = str(row.get('Details', ''))
+    if 'Fight of the Night' in details:
         rax += 50
 
     return rax
 
-# --- Streamlit UI ---
+# --- Streamlit app ---
 
-st.title("UFC Fighter RAX Calculator")
+def main():
+    st.title("UFC Fighter RAX Calculator")
 
-fighter_input_name = st.text_input("Enter UFC Fighter Name:", value="Max Holloway")
+    fighter_input_name = st.text_input("Enter fighter's full name (e.g. Max Holloway)")
 
-if fighter_input_name:
-    try:
-        with st.spinner("Searching fighter URL..."):
+    if fighter_input_name:
+        try:
             fighter_url = get_fighter_url_by_name(fighter_input_name)
-            st.success(f"Found URL for {fighter_input_name}: {fighter_url}")
+            st.write(f"Found URL for {fighter_input_name}: {fighter_url}")
 
-        with st.spinner("Loading fights..."):
             fight_links, main_fights_df = get_fight_links(fighter_url)
 
-        all_fight_details = []
-        with st.spinner("Loading detailed fight stats..."):
+            all_fight_details = []
             for fl in fight_links:
                 row = main_fights_df.loc[main_fights_df['fight_link'] == fl].iloc[0]
                 main_fighter_name = row['fighter_name']
                 opp_name = row['opponent_name']
                 details = parse_fight_details(fl, main_fighter_name, opp_name)
-                details['fighter_name'] = main_fighter_name
-                details['opponent_name'] = opp_name
-                details['fight_link'] = fl
                 all_fight_details.append(details)
 
-        advanced_df = pd.DataFrame(all_fight_details)
+            advanced_df = pd.DataFrame(all_fight_details)
+            combined_df = pd.merge(main_fights_df, advanced_df, on='fight_link', how='left')
+            combined_df = transform_columns(combined_df)
 
-        combined_df = pd.merge(main_fights_df, advanced_df, on='fight_link', how='left')
+            combined_df['rax_earned'] = combined_df.apply(calculate_rax, axis=1)
 
-        combined_df = transform_columns(combined_df)
+            total_rax = combined_df['rax_earned'].sum()
+            total_row = pd.DataFrame({
+                'fighter_name': [''],
+                'opponent_name': [''],
+                'result': [''],
+                'method_main': ['Total Rax'],
+                'rax_earned': [total_rax]
+            })
+            final_df = pd.concat([combined_df[['fighter_name', 'opponent_name', 'result', 'method_main', 'rax_earned']], total_row], ignore_index=True)
 
-        combined_df['rax_earned'] = combined_df.apply(calculate_rax, axis=1)
+            st.dataframe(final_df)
 
-        total_rax = combined_df['rax_earned'].sum()
+        except Exception as e:
+            st.error(f"Error: {e}\nPlease check the fighter name and try again.")
 
-        total_row = pd.DataFrame({
-            'fighter_name': [''],
-            'opponent_name': [''],
-            'result': [''],
-            'method_main': ['Total Rax'],
-            'rax_earned': [total_rax]
-        })
-
-        display_cols = ['fighter_name', 'opponent_name', 'result', 'method_main', 'rax_earned']
-        for col in display_cols:
-            if col not in combined_df.columns:
-                combined_df[col] = ""
-
-        final_df = pd.concat([
-            combined_df[display_cols],
-            total_row
-        ], ignore_index=True)
-
-        st.dataframe(final_df)
-
-    except Exception as e:
-        st.error(f"Error: {e}")
-        st.warning("Please check the fighter name and try again.")
+if __name__ == "__main__":
+    main()
