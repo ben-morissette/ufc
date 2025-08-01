@@ -280,9 +280,10 @@ def calculate_rax(row):
 def main(fighter_input_name):
     try:
         fighter_url = get_fighter_url_by_name(fighter_input_name)
+        print(f"Found URL for {fighter_input_name}: {fighter_url}")
     except ValueError as e:
-        st.error(str(e))
-        return None
+        print(e)
+        sys.exit(1)
 
     fight_links, main_fights_df = get_fight_links(fighter_url)
 
@@ -292,19 +293,43 @@ def main(fighter_input_name):
         main_fighter_name = row['fighter_name']
         opp_name = row['opponent_name']
         details = parse_fight_details(fl, main_fighter_name, opp_name)
-        details['fight_link'] = fl  # <--- Important fix to add fight_link
         all_fight_details.append(details)
 
     advanced_df = pd.DataFrame(all_fight_details)
+
+    # Before merge, make sure fight_link exists in both dfs
+    if 'fight_link' not in main_fights_df.columns or 'fight_link' not in advanced_df.columns:
+        raise KeyError("fight_link column missing in one of the dataframes")
 
     combined_df = pd.merge(main_fights_df, advanced_df, on='fight_link', how='left')
 
     combined_df = transform_columns(combined_df)
 
+    # Calculate rax earned
     combined_df['rax_earned'] = combined_df.apply(calculate_rax, axis=1)
 
+    # Debug print columns after merge + transform
+    print("Columns after merge and transform:", combined_df.columns.tolist())
+
+    # Fix column names if they were merged with _x/_y suffixes
+    for col in ['fighter_name', 'opponent_name', 'result', 'method_main']:
+        if col not in combined_df.columns:
+            for suffix in ['_x', '_y']:
+                col_alt = col + suffix
+                if col_alt in combined_df.columns:
+                    combined_df[col] = combined_df[col_alt]
+                    break
+
+    # Confirm columns now exist, else raise error
+    required_cols = ['fighter_name', 'opponent_name', 'result', 'method_main', 'rax_earned']
+    missing_cols = [c for c in required_cols if c not in combined_df.columns]
+    if missing_cols:
+        raise KeyError(f"Required columns missing after fix: {missing_cols}")
+
+    # Calculate total rax
     total_rax = combined_df['rax_earned'].sum()
 
+    # Create a total row for display
     total_row = pd.DataFrame({
         'fighter_name': [''],
         'opponent_name': [''],
@@ -313,7 +338,7 @@ def main(fighter_input_name):
         'rax_earned': [total_rax]
     })
 
-    final_df = pd.concat([combined_df[['fighter_name', 'opponent_name', 'result', 'method_main', 'rax_earned']], total_row], ignore_index=True)
+    final_df = pd.concat([combined_df[required_cols], total_row], ignore_index=True)
 
     return final_df
 
