@@ -139,7 +139,6 @@ def render_editable_rows(df):
                                   index=list(RARITY_MULTIPLIERS.keys()).index(row['Rarity']),
                                   key=f"rarity_{idx}", label_visibility="collapsed")
         with cols[3]:
-            # Show precomputed RAX from selected rarity column
             rax_value = row[f"Rax_{rarity}"]
             st.markdown(f"<div class='row-box'>{rax_value}</div>", unsafe_allow_html=True)
         rarities.append(rarity)
@@ -156,8 +155,9 @@ def main():
 
     df['Rarity'] = st.session_state.rarities
 
-    # Sort by selected rarity RAX values
-    df['Total Rax'] = [row[f"Rax_{rar}"] for row, rar in zip(df.itertuples(index=False), df['Rarity'])]
+    # Use getattr for dynamic column access from itertuples for performance
+    df['Total Rax'] = [getattr(row, f"Rax_{rar}") for row, rar in zip(df.itertuples(index=False), df['Rarity'])]
+
     df = df.sort_values(by='Total Rax', ascending=False).reset_index(drop=True)
     if 'Rank' in df.columns:
         df.drop(columns=['Rank'], inplace=True)
