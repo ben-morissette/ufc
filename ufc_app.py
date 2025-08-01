@@ -193,7 +193,7 @@ def main():
 
     # Row style for top 3 ranks
     gb.configure_grid_options(
-        getRowClass=highlight_top_3()
+        getRowClass=highlight_top_3
     )
 
     grid_options = gb.build()
