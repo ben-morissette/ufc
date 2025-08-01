@@ -4,7 +4,6 @@ from bs4 import BeautifulSoup
 import pandas as pd
 from datetime import datetime, timedelta
 import os
-from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 
 CACHE_FILE = 'ufc_rax_leaderboard.csv'
 FIGHTER_LIMIT = 10
@@ -138,7 +137,6 @@ def generate_leaderboard():
                 'Fighter Name': name,
                 'Base Rax': total_rax,
                 'Fight Count': len(fights_df),
-                'Rarity': 'Uncommon',
             })
         except Exception:
             continue
@@ -147,73 +145,40 @@ def generate_leaderboard():
     df.insert(0, 'Rank', df.index + 1)
     return df
 
-def recalc_total_rax(df):
-    if 'Rarity' not in df.columns:
-        df['Rarity'] = 'Uncommon'
+def cache_and_load_leaderboard():
+    if cache_is_fresh():
+        df = pd.read_csv(CACHE_FILE)
+        # Drop Rank column if exists, will reinsert below
+        if 'Rank' in df.columns:
+            df.drop(columns=['Rank'], inplace=True)
+        # Ensure columns exist
+        if 'Base Rax' not in df.columns and 'Total Rax' in df.columns:
+            df.rename(columns={'Total Rax': 'Base Rax'}, inplace=True)
+        df.insert(0, 'Rank', df.index + 1)
+        return df
     else:
-        df['Rarity'] = df['Rarity'].fillna('Uncommon')
-    if 'Base Rax' not in df.columns:
-        raise ValueError("DataFrame missing 'Base Rax' column")
-
-    df["Total Rax"] = df.apply(
-        lambda r: round(r["Base Rax"] * RARITY_MULTIPLIERS.get(r["Rarity"], 1.4), 1),
-        axis=1,
-    )
-    df.sort_values("Total Rax", ascending=False, inplace=True)
-    df.reset_index(drop=True, inplace=True)
-    df["Rank"] = df.index + 1
-    return df
+        df = generate_leaderboard()
+        df.to_csv(CACHE_FILE, index=False)
+        return df
 
 st.title("UFC Fighter RAX Leaderboard")
 
-if cache_is_fresh():
-    leaderboard_df = pd.read_csv(CACHE_FILE)
-    if 'Rank' in leaderboard_df.columns:
-        leaderboard_df.drop(columns=['Rank'], inplace=True)
-    if 'Total Rax' in leaderboard_df.columns and 'Base Rax' not in leaderboard_df.columns:
-        leaderboard_df.rename(columns={'Total Rax': 'Base Rax'}, inplace=True)
-    if 'Rarity' not in leaderboard_df.columns:
-        leaderboard_df['Rarity'] = 'Uncommon'
-    else:
-        leaderboard_df['Rarity'] = leaderboard_df['Rarity'].fillna('Uncommon')
-    leaderboard_df.insert(0, 'Rank', leaderboard_df.index + 1)
-else:
-    leaderboard_df = generate_leaderboard()
-    leaderboard_df.to_csv(CACHE_FILE, index=False)
+# Load or generate leaderboard
+leaderboard_df = cache_and_load_leaderboard()
 
-leaderboard_df = recalc_total_rax(leaderboard_df)
+# Dropdown for rarity selection
+rarity_selected = st.selectbox("Select Rarity Multiplier:", list(RARITY_MULTIPLIERS.keys()), index=0)
 
-gb = GridOptionsBuilder.from_dataframe(leaderboard_df)
-gb.configure_column("Rank", editable=False, width=70)
-gb.configure_column("Fighter Name", editable=False, width=200)
-gb.configure_column("Fight Count", editable=False, width=110)
-gb.configure_column("Base Rax", editable=False, hide=True)
-gb.configure_column(
-    "Rarity",
-    editable=True,
-    cellEditor="agSelectCellEditor",
-    cellEditorParams={"values": list(RARITY_MULTIPLIERS.keys())},
-    width=140,
-)
-gb.configure_column("Total Rax", editable=False, width=110, sort="desc")
+# Calculate Total Rax with selected rarity multiplier
+leaderboard_df['Total Rax'] = leaderboard_df['Base Rax'] * RARITY_MULTIPLIERS[rarity_selected]
+leaderboard_df['Total Rax'] = leaderboard_df['Total Rax'].round(1)
 
-grid_options = gb.build()
+# Resort by Total Rax descending and update ranks
+leaderboard_df = leaderboard_df.sort_values(by='Total Rax', ascending=False).reset_index(drop=True)
+leaderboard_df['Rank'] = leaderboard_df.index + 1
 
-grid_response = AgGrid(
-    leaderboard_df,
-    gridOptions=grid_options,
-    update_mode=GridUpdateMode.MODEL_CHANGED,
-    allow_unsafe_jscode=True,
-    theme="alpine",
-    height=600,
-    fit_columns_on_grid_load=True,
-)
-
-updated_df = pd.DataFrame(grid_response["data"])
-updated_df = recalc_total_rax(updated_df)
-
-st.markdown("### Adjusted Leaderboard (Sorted by Total Rax)")
+# Show final leaderboard table
 st.dataframe(
-    updated_df[["Rank", "Fighter Name", "Total Rax", "Rarity", "Fight Count"]],
+    leaderboard_df[['Rank', 'Fighter Name', 'Total Rax', 'Fight Count']],
     use_container_width=True,
 )
