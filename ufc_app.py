@@ -4,9 +4,11 @@ from bs4 import BeautifulSoup
 import pandas as pd
 from datetime import datetime, timedelta
 import os
+import time
 
+# Constants
 CACHE_FILE = 'ufc_rax_leaderboard.csv'
-FIGHTER_LIMIT = 10
+FIGHTER_LIMIT = 10  # Limit fighters in test mode
 RARITY_MULTIPLIERS = {
     "Uncommon": 1.4,
     "Rare": 1.6,
@@ -16,191 +18,149 @@ RARITY_MULTIPLIERS = {
     "Iconic": 6,
 }
 
-def get_last_tuesday(reference_date=None):
-    if reference_date is None:
-        reference_date = datetime.now()
-    days_since_tuesday = (reference_date.weekday() - 1) % 7
-    return reference_date - timedelta(days=days_since_tuesday)
+# Utility Functions
+def get_last_tuesday():
+    today = datetime.today()
+    offset = (today.weekday() - 1) % 7
+    return (today - timedelta(days=offset)).date()
 
 def cache_is_fresh():
     if not os.path.exists(CACHE_FILE):
         return False
-    mod_time = datetime.fromtimestamp(os.path.getmtime(CACHE_FILE))
-    return mod_time >= get_last_tuesday()
+    last_modified = datetime.fromtimestamp(os.path.getmtime(CACHE_FILE)).date()
+    return last_modified == get_last_tuesday()
 
-def get_fighter_urls():
-    url = "http://ufcstats.com/statistics/fighters"
-    response = requests.get(url)
-    soup = BeautifulSoup(response.text, 'html.parser')
+# Scraping Functions
+def get_fighter_urls(limit=None):
+    url = 'http://ufcstats.com/statistics/fighters?char=a&page=all'
+    r = requests.get(url)
+    soup = BeautifulSoup(r.text, 'html.parser')
     table = soup.find('table', class_='b-statistics__table')
-    rows = table.find('tbody').find_all('tr', class_='b-statistics__table-row')
-    urls = []
-    for row in rows:
-        link = row.find_all('td')[0].find('a', class_='b-link_style_black')
-        if link and link.has_attr('href'):
-            urls.append(link['href'])
-    return urls[:FIGHTER_LIMIT]
-
-def get_two_values_from_col(col):
-    ps = col.find_all('p', class_='b-fight-details__table-text')
-    return (ps[0].get_text(strip=True), ps[1].get_text(strip=True)) if len(ps) == 2 else (None, None)
+    links = ['http://ufcstats.com' + a['href'] for a in table.find_all('a', href=True) if '/fighter-details/' in a['href']]
+    return links[:limit] if limit else links
 
 def get_fight_data(fighter_url):
-    response = requests.get(fighter_url)
-    soup = BeautifulSoup(response.text, 'html.parser')
-    table = soup.find('table', class_='b-fight-details__table_type_event-details')
-    if not table:
-        return pd.DataFrame()
+    r = requests.get(fighter_url)
+    soup = BeautifulSoup(r.text, 'html.parser')
+    name_tag = soup.find('span', class_='b-content__title-highlight')
+    if not name_tag:
+        return None
 
-    rows = table.find('tbody').find_all('tr', class_='b-fight-details__table-row__hover')
-    fights = []
-    for row in rows:
-        cols = row.find_all('td', class_='b-fight-details__table-col')
-        result = cols[0].find('p').get_text(strip=True).lower()
-        fighter_name = cols[1].find_all('p')[0].get_text(strip=True)
-        opponent_name = cols[1].find_all('p')[1].get_text(strip=True)
-        kd_f, kd_o = get_two_values_from_col(cols[2])
-        str_f, str_o = get_two_values_from_col(cols[3])
-        td_f, td_o = get_two_values_from_col(cols[4])
-        sub_f, sub_o = get_two_values_from_col(cols[5])
-        event_name = cols[6].find_all('p')[0].get_text(strip=True)
-        method = cols[7].find_all('p')[0].get_text(strip=True)
-        round_val = cols[8].find('p').get_text(strip=True)
+    name = name_tag.text.strip()
+    fight_rows = soup.find_all('tr', class_='b-fight-details__table-row')[1:]
+    wins = 0
+    losses = 0
 
-        fights.append({
-            'Result': result,
-            'Fighter Name': fighter_name,
-            'Opponent Name': opponent_name,
-            'KD Fighter': kd_f,
-            'KD Opponent': kd_o,
-            'Strikes Fighter': str_f,
-            'Strikes Opponent': str_o,
-            'Takedowns Fighter': td_f,
-            'Takedowns Opponent': td_o,
-            'Submission Attempts Fighter': sub_f,
-            'Submission Attempts Opponent': sub_o,
-            'Event Name': event_name,
-            'Method Main': method,
-            'Round': round_val,
-        })
-    return pd.DataFrame(fights)
+    for row in fight_rows:
+        result = row.find_all('td')[0].text.strip()
+        if result == 'win':
+            wins += 1
+        elif result == 'loss':
+            losses += 1
 
-def calculate_rax(row):
-    rax = 0
-    if row['Result'] == 'win':
-        method = row['Method Main']
-        if method == 'KO/TKO':
-            rax += 100
-        elif method in ['Submission', 'SUB']:
-            rax += 90
-        elif method in ['Decision - Unanimous', 'U-DEC']:
-            rax += 80
-        elif method == 'Decision - Majority':
-            rax += 75
-        elif method == 'Decision - Split':
-            rax += 70
-    elif row['Result'] == 'loss':
-        rax += 25
+    return {'Fighter Name': name, 'Wins': wins, 'Losses': losses, 'Fight Count': wins + losses}
 
-    try:
-        strike_diff = int(row['Strikes Fighter']) - int(row['Strikes Opponent'])
-        if strike_diff > 0:
-            rax += strike_diff
-    except:
-        pass
+def calculate_rax(fighter):
+    return fighter['Wins'] * 100 + fighter['Fight Count'] * 10
 
-    if row['Round'] == '5':
-        rax += 25
+def generate_leaderboard(limit=FIGHTER_LIMIT):
+    fighter_urls = get_fighter_urls(limit=limit)
+    data = []
 
-    ev = row['Event Name'].lower()
-    if 'fight of the night' in ev or 'fight of night' in ev:
-        rax += 50
-    if 'championship' in ev:
-        rax += 25
-
-    return rax
-
-def generate_leaderboard():
-    fighter_urls = get_fighter_urls()
-    leaderboard = []
     for url in fighter_urls:
         try:
-            fights_df = get_fight_data(url)
-            if fights_df.empty:
-                continue
-            fights_df['Rax Earned'] = fights_df.apply(calculate_rax, axis=1)
-            total_rax = fights_df['Rax Earned'].sum()
-            name = fights_df.iloc[0]['Fighter Name']
-            leaderboard.append({
-                'Fighter Name': name,
-                'Base Rax': total_rax,
-                'Fight Count': len(fights_df),
-                'Rarity': 'Uncommon',
-            })
-        except Exception:
-            continue
-    df = pd.DataFrame(leaderboard)
+            fighter = get_fight_data(url)
+            if fighter:
+                fighter['Base Rax'] = calculate_rax(fighter)
+                data.append(fighter)
+            time.sleep(0.2)
+        except Exception as e:
+            print(f"Error processing {url}: {e}")
+
+    df = pd.DataFrame(data)
     df = df.sort_values(by='Base Rax', ascending=False).reset_index(drop=True)
     df.insert(0, 'Rank', df.index + 1)
+    df['Rarity'] = 'Uncommon'  # default value
     return df
 
 def cache_and_load_leaderboard():
     if cache_is_fresh():
-        df = pd.read_csv(CACHE_FILE)
-        if 'Rank' in df.columns:
-            df.drop(columns=['Rank'], inplace=True)
-        if 'Base Rax' not in df.columns and 'Total Rax' in df.columns:
-            df.rename(columns={'Total Rax': 'Base Rax'}, inplace=True)
-        df['Rarity'] = df.get('Rarity', 'Uncommon')
-        df.insert(0, 'Rank', df.index + 1)
-        return df
-    else:
-        df = generate_leaderboard()
-        df['Rarity'] = 'Uncommon'
-        df.to_csv(CACHE_FILE, index=False)
-        df.insert(0, 'Rank', df.index + 1)
-        return df
+        return pd.read_csv(CACHE_FILE)
+    df = generate_leaderboard()
+    df.to_csv(CACHE_FILE, index=False)
+    return df
 
-st.title("UFC Fighter RAX Leaderboard")
+# UI Rendering
+def render_table_with_dropdowns(df):
+    st.markdown("""
+    <style>
+    .custom-table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
+    .custom-table th, .custom-table td {
+        border: 1px solid #ddd;
+        padding: 8px;
+        text-align: center;
+    }
+    .custom-table th { background-color: #f5f5f5; font-weight: 600; }
+    .custom-table tr:hover { background-color: #f1f1f1; }
+    </style>
+    """, unsafe_allow_html=True)
 
-leaderboard_df = cache_and_load_leaderboard()
+    st.markdown('<table class="custom-table">', unsafe_allow_html=True)
+    st.markdown("""
+        <tr>
+            <th>#</th>
+            <th>Fighter</th>
+            <th>Base Rax</th>
+            <th>Rarity</th>
+            <th>Total Rax</th>
+        </tr>
+    """, unsafe_allow_html=True)
 
-col_widths = [2, 1, 1, 1]
+    selected_rarities = []
+    for idx, row in df.iterrows():
+        rarity_key = f"rarity_{idx}"
+        selected_rarity = st.selectbox(
+            "", list(RARITY_MULTIPLIERS.keys()),
+            index=list(RARITY_MULTIPLIERS.keys()).index(row.get('Rarity', 'Uncommon')),
+            key=rarity_key, label_visibility="collapsed"
+        )
+        selected_rarities.append(selected_rarity)
 
-# Header row
-header_cols = st.columns(col_widths)
-header_cols[0].markdown("**Fighter Name**")
-header_cols[1].markdown("**Rarity**")
-header_cols[2].markdown("**Base Rax**")
-header_cols[3].markdown("**Total Rax**")
+        total = round(row["Base Rax"] * RARITY_MULTIPLIERS[selected_rarity], 1)
 
-rarity_selections = []
+        st.markdown(f"""
+        <tr>
+            <td>{row['Rank']}</td>
+            <td>{row['Fighter Name']}</td>
+            <td>{row['Base Rax']}</td>
+            <td>{selected_rarity}</td>
+            <td>{total}</td>
+        </tr>
+        """, unsafe_allow_html=True)
 
-for idx, row in leaderboard_df.iterrows():
-    cols = st.columns(col_widths)
-    cols[0].write(row['Fighter Name'])
-    selected_rarity = cols[1].selectbox(
-        "",  # <-- No label here
-        options=list(RARITY_MULTIPLIERS.keys()),
-        index=list(RARITY_MULTIPLIERS.keys()).index(row['Rarity']) if row['Rarity'] in RARITY_MULTIPLIERS else 0,
-        key=f"rarity_select_{idx}"
+    st.markdown("</table>", unsafe_allow_html=True)
+    return selected_rarities
+
+# Main App
+def main():
+    st.set_page_config(layout="wide", page_title="UFC RAX Leaderboard")
+    st.title("🏆 UFC Fighter RAX Leaderboard")
+
+    leaderboard_df = cache_and_load_leaderboard()
+    selected_rarities = render_table_with_dropdowns(leaderboard_df)
+
+    # Recalculate RAX based on user-selected rarity
+    updated_df = leaderboard_df.copy()
+    updated_df['Rarity'] = selected_rarities
+    updated_df['Total Rax'] = updated_df.apply(
+        lambda row: round(row['Base Rax'] * RARITY_MULTIPLIERS[row['Rarity']], 1), axis=1
     )
-    cols[2].write(row['Base Rax'])
-    total_rax = round(row['Base Rax'] * RARITY_MULTIPLIERS[selected_rarity], 1)
-    cols[3].write(total_rax)
-    rarity_selections.append(selected_rarity)
+    updated_df = updated_df.sort_values(by="Total Rax", ascending=False).reset_index(drop=True)
+    updated_df.insert(0, 'Rank', updated_df.index + 1)
 
-summary_df = leaderboard_df.copy()
-summary_df['Rarity'] = rarity_selections
-summary_df['Total Rax'] = summary_df.apply(
-    lambda r: round(r['Base Rax'] * RARITY_MULTIPLIERS[r['Rarity']], 1), axis=1
-)
-summary_df = summary_df.sort_values(by='Total Rax', ascending=False).reset_index(drop=True)
-summary_df.insert(0, 'Rank', summary_df.index + 1)
+    st.markdown("---")
+    st.markdown("### 📊 Final Leaderboard")
+    st.dataframe(updated_df[['Rank', 'Fighter Name', 'Total Rax', 'Rarity', 'Fight Count']], use_container_width=True)
 
-st.markdown("---")
-st.markdown("### Leaderboard Summary")
-st.dataframe(
-    summary_df[['Rank', 'Fighter Name', 'Total Rax', 'Rarity', 'Fight Count']],
-    use_container_width=True,
-)
+if __name__ == "__main__":
+    main()
