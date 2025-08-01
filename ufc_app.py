@@ -3,15 +3,6 @@ import requests
 from bs4 import BeautifulSoup
 import pandas as pd
 
-RARITY_MULTIPLIERS = {
-    "Uncommon": 1.4,
-    "Rare": 1.6,
-    "Epic": 2,
-    "Legendary": 2.5,
-    "Mystic": 4,
-    "Iconic": 6,
-}
-
 def get_fighter_url_by_name(name):
     base_url = "http://ufcstats.com/statistics/fighters"
     page = 1
@@ -23,29 +14,20 @@ def get_fighter_url_by_name(name):
         soup = BeautifulSoup(response.text, "html.parser")
         table = soup.find("table", class_="b-statistics__table")
         if not table:
-            break  # no table means no fighters here
+            break
 
         rows = table.find("tbody").find_all("tr")
         if not rows:
-            break  # no rows means no fighters here
+            break
 
-        found_url = None
         for row in rows:
             link = row.find_all("td")[0].find("a", class_="b-link_style_black")
-            if link and link.text.strip().lower() == name_lower:
-                found_url = link["href"]
-                break
+            if link and name_lower in link.text.strip().lower():
+                return link["href"]
 
-        if found_url:
-            return found_url
-
-        page += 1  # next page
+        page += 1
 
     return None
-
-def get_two_values_from_col(col):
-    ps = col.find_all("p", class_="b-fight-details__table-text")
-    return (ps[0].get_text(strip=True), ps[1].get_text(strip=True)) if len(ps) == 2 else (None, None)
 
 def get_fight_data(fighter_url):
     response = requests.get(fighter_url)
@@ -61,26 +43,13 @@ def get_fight_data(fighter_url):
         result = cols[0].find("p").get_text(strip=True).lower()
         fighter_name = cols[1].find_all("p")[0].get_text(strip=True)
         opponent_name = cols[1].find_all("p")[1].get_text(strip=True)
-        kd_f, kd_o = get_two_values_from_col(cols[2])
-        str_f, str_o = get_two_values_from_col(cols[3])
-        td_f, td_o = get_two_values_from_col(cols[4])
-        sub_f, sub_o = get_two_values_from_col(cols[5])
         event_name = cols[6].find_all("p")[0].get_text(strip=True)
         method = cols[7].find_all("p")[0].get_text(strip=True)
         round_val = cols[8].find("p").get_text(strip=True)
-
         fights.append({
             "Result": result,
             "Fighter Name": fighter_name,
             "Opponent Name": opponent_name,
-            "KD Fighter": kd_f,
-            "KD Opponent": kd_o,
-            "Strikes Fighter": str_f,
-            "Strikes Opponent": str_o,
-            "Takedowns Fighter": td_f,
-            "Takedowns Opponent": td_o,
-            "Submission Attempts Fighter": sub_f,
-            "Submission Attempts Opponent": sub_o,
             "Event Name": event_name,
             "Method Main": method,
             "Round": round_val,
@@ -103,13 +72,6 @@ def calculate_rax(row):
             rax += 70
     elif row["Result"] == "loss":
         rax += 25
-
-    try:
-        strike_diff = int(row["Strikes Fighter"]) - int(row["Strikes Opponent"])
-        if strike_diff > 0:
-            rax += strike_diff
-    except:
-        pass
 
     if row["Round"] == "5":
         rax += 25
