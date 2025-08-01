@@ -141,22 +141,18 @@ def generate_leaderboard():
     df.insert(0, 'Rank', df.index + 1)
     return df
 
-# ------------- Styling & UI -------------
-
-def highlight_top_3(params):
-    # JavaScript style function for row class rules, highlight top 3 with gold/silver/bronze colors
-    return JsCode("""
-        function(params) {
-            if (params.node.rowIndex === 0) {
-                return 'top1';
-            } else if (params.node.rowIndex === 1) {
-                return 'top2';
-            } else if (params.node.rowIndex === 2) {
-                return 'top3';
-            }
-            return '';
+highlight_top_3 = JsCode("""
+    function(params) {
+        if (params.node.rowIndex === 0) {
+            return 'top1';
+        } else if (params.node.rowIndex === 1) {
+            return 'top2';
+        } else if (params.node.rowIndex === 2) {
+            return 'top3';
         }
-    """)
+        return '';
+    }
+""")
 
 def main():
     st.set_page_config(page_title="UFC RAX Leaderboard", layout="wide")
@@ -173,28 +169,25 @@ def main():
         leaderboard_df = generate_leaderboard()
         leaderboard_df.to_csv(CACHE_FILE, index=False)
 
-    # Add initial Total Rax column
-    leaderboard_df['Total Rax'] = leaderboard_df['Base Rax'] * RARITY_MULTIPLIERS['Uncommon']
-    leaderboard_df['Total Rax'] = leaderboard_df['Total Rax'].round(1)
+    # Calculate initial Total Rax column (Base Rax * default rarity multiplier)
+    leaderboard_df['Total Rax'] = (leaderboard_df['Base Rax'] * RARITY_MULTIPLIERS['Uncommon']).round(1)
 
     gb = GridOptionsBuilder.from_dataframe(leaderboard_df)
 
-    # Column configs for clean leaderboard style
     gb.configure_column("Rank", editable=False, width=70, cellClass='rank-cell', sortable=True)
     gb.configure_column("Fighter Name", editable=False, width=200)
     gb.configure_column("Fight Count", editable=False, width=110)
-    gb.configure_column("Base Rax", editable=False, hide=True)  # internal only
-    gb.configure_column("Rarity",
-                        editable=True,
-                        cellEditor='agSelectCellEditor',
-                        cellEditorParams={'values': list(RARITY_MULTIPLIERS.keys())},
-                        width=130)
+    gb.configure_column("Base Rax", editable=False, hide=True)  # internal use only
+    gb.configure_column(
+        "Rarity",
+        editable=True,
+        cellEditor='agSelectCellEditor',
+        cellEditorParams={'values': list(RARITY_MULTIPLIERS.keys())},
+        width=130,
+    )
     gb.configure_column("Total Rax", editable=False, width=110, sort='desc')
 
-    # Row style for top 3 ranks
-    gb.configure_grid_options(
-        getRowClass=highlight_top_3
-    )
+    gb.configure_grid_options(getRowClass=highlight_top_3)
 
     grid_options = gb.build()
 
@@ -212,22 +205,17 @@ def main():
 
     updated_df = pd.DataFrame(grid_response['data'])
 
-    # Recalculate Total Rax live based on rarity
-    def recalc_total_rax(row):
-        rarity = row['Rarity']
-        base = row['Base Rax']
-        multiplier = RARITY_MULTIPLIERS.get(rarity, 1.4)
-        return round(base * multiplier, 1)
-
-    updated_df['Total Rax'] = updated_df.apply(recalc_total_rax, axis=1)
+    # Recalculate Total Rax live based on rarity change - **IMPORTANT: no trailing comma here!**
+    updated_df['Total Rax'] = updated_df.apply(
+        lambda row: round(row['Base Rax'] * RARITY_MULTIPLIERS.get(row['Rarity'], 1.4), 1),
+        axis=1,
+    )
 
     # Sort by Total Rax descending and re-rank
     updated_df = updated_df.sort_values('Total Rax', ascending=False).reset_index(drop=True)
     updated_df['Rank'] = updated_df.index + 1
 
-    # Display final sorted leaderboard table below the grid
     st.markdown("### Adjusted RAX Leaderboard (Sorted by Total Rax)")
-
     st.dataframe(
         updated_df[['Rank', 'Fighter Name', 'Total Rax', 'Rarity', 'Fight Count']],
         use_container_width=True,
