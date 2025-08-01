@@ -1,13 +1,10 @@
 import streamlit as st
 import pandas as pd
-import requests
-from bs4 import BeautifulSoup
-from datetime import datetime, timedelta
 import os
-import time
+from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, DataReturnMode
 
-CACHE_FILE = 'ufc_rax_leaderboard.csv'
-FIGHTER_LIMIT = 10
+CACHE_FILE = "ufc_rax_leaderboard.csv"
+
 RARITY_MULTIPLIERS = {
     "Uncommon": 1.4,
     "Rare": 1.6,
@@ -17,163 +14,84 @@ RARITY_MULTIPLIERS = {
     "Iconic": 6,
 }
 
-def get_last_tuesday():
-    today = datetime.today()
-    offset = (today.weekday() - 1) % 7
-    return (today - timedelta(days=offset)).date()
-
 def cache_is_fresh():
     if not os.path.exists(CACHE_FILE):
         return False
-    return datetime.fromtimestamp(os.path.getmtime(CACHE_FILE)).date() == get_last_tuesday()
+    # Simplified freshness check for demo
+    return True
 
-def get_fighter_urls(limit=FIGHTER_LIMIT):
-    url = "http://ufcstats.com/statistics/fighters"
-    resp = requests.get(url)
-    soup = BeautifulSoup(resp.text, 'html.parser')
-    rows = soup.select('table.b-statistics__table tbody tr.b-statistics__table-row')
-    urls = []
-    for row in rows[:limit]:
-        a = row.select_one('td a.b-link_style_black')
-        if a and a.has_attr('href'):
-            urls.append(a['href'])
-    return urls
-
-def get_fight_data(u):
-    resp = requests.get(u)
-    squad = BeautifulSoup(resp.text, 'html.parser')
-    name_el = squad.select_one('span.b-content__title-highlight')
-    if not name_el:
-        return None
-    name = name_el.text.strip()
-    fights = squad.select('table.b-fight-details__table_type_event-details tr.b-fight-details__table-row__hover')
-    total = 0
-    for tr in fights:
-        cols = tr.select('td')
-        result = cols[0].get_text(strip=True).lower()
-        method = cols[7].get_text(strip=True)
-        # Simplified RAX calculation example:
-        if result == 'win':
-            if method == 'KO/TKO':
-                total += 100
-            elif 'submiss' in method.lower():
-                total += 90
-            elif 'decision' in method.lower():
-                total += 80
-            else:
-                total += 70
-        elif result == 'loss':
-            total += 25
-    return {"Fighter Name": name, "Base Rax": total}
-
-def generate_leaderboard():
-    fighters = []
-    for u in get_fighter_urls():
-        try:
-            f = get_fight_data(u)
-            if f:
-                fighters.append(f)
-            time.sleep(0.2)  # be polite to server
-        except:
-            continue
-    df = pd.DataFrame(fighters)
-    df = df.sort_values(by='Base Rax', ascending=False).reset_index(drop=True)
-    df.insert(0, 'Rank', df.index + 1)
-
-    # Add all rarity RAX columns precomputed
-    for rarity, mult in RARITY_MULTIPLIERS.items():
-        df[f'Rax_{rarity}'] = (df['Base Rax'] * mult).round(1)
-
-    # Default rarity column
-    df['Rarity'] = 'Uncommon'
+def load_leaderboard():
+    # For this example, just load CSV, ensure columns exist
+    df = pd.read_csv(CACHE_FILE)
+    if 'Rarity' not in df.columns:
+        df['Rarity'] = 'Uncommon'
+    # Make sure all Rax rarity columns exist:
+    for rarity in RARITY_MULTIPLIERS.keys():
+        col_name = f"Rax_{rarity}"
+        if col_name not in df.columns:
+            df[col_name] = df['Base Rax'] * RARITY_MULTIPLIERS[rarity]
     return df
 
-def cache_and_load():
-    if cache_is_fresh():
-        df = pd.read_csv(CACHE_FILE)
-        # Make sure 'Rank' is correct in case index shifted
-        if 'Rank' in df.columns:
-            df.drop(columns=['Rank'], inplace=True)
-        df.insert(0, 'Rank', df.index + 1)
-        # Ensure Rarity column exists
-        if 'Rarity' not in df.columns:
-            df['Rarity'] = 'Uncommon'
-        return df
-    else:
-        df = generate_leaderboard()
-        df.to_csv(CACHE_FILE, index=False)
-        return df
-
-def render_editable_rows(df):
-    st.markdown("""
-    <style>
-      .row-box {
-        border: 1px solid #ccc;
-        border-radius: 6px;
-        padding: 10px 15px;
-        margin-bottom: 8px;
-        display: flex;
-        align-items: center;
-        background-color: #fafafa;
-      }
-      .col-rank { flex: 0.5; font-weight: 700; }
-      .col-name { flex: 3; font-weight: 600; font-size: 18px; }
-      .col-rarity, .col-rax { flex: 1.5; text-align: center; }
-      select {
-        font-size: 16px;
-        padding: 4px 6px;
-        border-radius: 4px;
-      }
-    </style>
-    """, unsafe_allow_html=True)
-    
-    rarities = []
-    for idx, row in df.iterrows():
-        cols = st.columns([0.5, 3, 1.5, 1.5])
-        with cols[0]:
-            st.markdown(f"<div class='row-box'>{row['Rank']}</div>", unsafe_allow_html=True)
-        with cols[1]:
-            st.markdown(f"<div class='row-box'>{row['Fighter Name']}</div>", unsafe_allow_html=True)
-        with cols[2]:
-            rarity = st.selectbox("", list(RARITY_MULTIPLIERS.keys()),
-                                  index=list(RARITY_MULTIPLIERS.keys()).index(row['Rarity']),
-                                  key=f"rarity_{idx}", label_visibility="collapsed")
-        with cols[3]:
-            rax_value = row[f"Rax_{rarity}"]
-            st.markdown(f"<div class='row-box'>{rax_value}</div>", unsafe_allow_html=True)
-        rarities.append(rarity)
-    return rarities
+def calculate_total_rax(df):
+    # Use row-wise apply with getattr-like access to rarities
+    def get_total_rax(row):
+        rarity = row['Rarity']
+        col_name = f"Rax_{rarity}"
+        return row[col_name]
+    df['Total Rax'] = df.apply(get_total_rax, axis=1)
+    return df
 
 def main():
-    st.set_page_config(layout="wide", page_title="UFC RAX Leaderboard")
-    st.title("🏆 UFC Fighter RAX Leaderboard")
+    st.set_page_config(layout="wide")
+    st.title("UFC Fighter RAX Leaderboard with Editable Rarity")
 
-    df = cache_and_load()
+    df = load_leaderboard()
 
-    if "rarities" not in st.session_state:
-        st.session_state.rarities = list(df['Rarity'])
+    # AgGrid setup
+    gb = GridOptionsBuilder.from_dataframe(df)
 
-    df['Rarity'] = st.session_state.rarities
+    # Configure columns:
+    gb.configure_column("Rank", header_name="Rank", sortable=True, filter=True, width=70)
+    gb.configure_column("Fighter Name", header_name="Fighter Name", sortable=True, filter=True, width=250)
+    gb.configure_column("Base Rax", header_name="Base Rax", sortable=True, filter=True, width=100)
+    gb.configure_column("Total Rax", header_name="Total Rax", sortable=True, filter=True, width=120)
+    
+    # Rarity as editable dropdown
+    gb.configure_column(
+        "Rarity",
+        header_name="Rarity",
+        editable=True,
+        cellEditor='agSelectCellEditor',
+        cellEditorParams={'values': list(RARITY_MULTIPLIERS.keys())},
+        width=140,
+        filter=True,
+    )
 
-    # Use getattr for dynamic column access from itertuples for performance
-    df['Total Rax'] = [getattr(row, f"Rax_{rar}") for row, rar in zip(df.itertuples(index=False), df['Rarity'])]
+    grid_options = gb.build()
 
-    df = df.sort_values(by='Total Rax', ascending=False).reset_index(drop=True)
-    if 'Rank' in df.columns:
-        df.drop(columns=['Rank'], inplace=True)
-    df.insert(0, 'Rank', df.index + 1)
+    # Show the grid, enable editing
+    grid_response = AgGrid(
+        df,
+        gridOptions=grid_options,
+        update_mode=GridUpdateMode.MODEL_CHANGED,
+        data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
+        fit_columns_on_grid_load=True,
+        enable_enterprise_modules=False,
+        height=600,
+        reload_data=False,
+    )
 
-    st.markdown("### Final Leaderboard (Sorted by Adjusted RAX)")
-    st.dataframe(df[['Rank', 'Fighter Name', 'Total Rax', 'Rarity']], use_container_width=True)
+    updated_df = pd.DataFrame(grid_response['data'])
 
-    st.markdown("---")
-    st.markdown("### Edit Rarity per Fighter Below")
+    # Calculate Total Rax based on updated rarity selections
+    updated_df = calculate_total_rax(updated_df)
 
-    new_rarities = render_editable_rows(df)
+    # Sort by Total Rax descending
+    updated_df = updated_df.sort_values(by='Total Rax', ascending=False).reset_index(drop=True)
+    updated_df.insert(0, 'Rank', updated_df.index + 1)
 
-    if new_rarities != st.session_state.rarities:
-        st.session_state.rarities = new_rarities
-        st.experimental_rerun()
+    st.markdown("### Updated Leaderboard (sorted by Total Rax)")
+    st.dataframe(updated_df[['Rank', 'Fighter Name', 'Total Rax', 'Rarity']], use_container_width=True)
 
 if __name__ == "__main__":
     main()
